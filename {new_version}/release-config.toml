@@ -1,0 +1,3 @@
+[release]
+base-version = {base_version}
+version = {new_version}
