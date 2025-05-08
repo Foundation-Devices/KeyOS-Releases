@@ -28,3 +28,8 @@ unsign VERSION:
     @echo "Removing manifest file if it exists..."
     rm -f v{{VERSION}}/manifest.json
     @echo "✓ All files have been reset to their unsigned state"
+
+# Validate that all files for a version are properly signed
+validate VERSION:
+    @echo "Validating signatures for version {{VERSION}}..."
+    cargo run --manifest-path tools/signer/Cargo.toml -- validate {{VERSION}}
