@@ -87,35 +87,32 @@ manifest_json="{\n"
 manifest_json+="  \"version\": \"v${VERSION}\",\n"
 manifest_json+="  \"files\": [\n"
 
-# Add recovery.bin to manifest if it exists
-if [ -f "${VERSION_FOLDER}/recovery.bin" ]; then
-    recovery_hash=$(${HASH_CMD} ${VERSION_FOLDER}/recovery.bin | cut -d' ' -f${HASH_CUT_FIELD})
-    manifest_json+="    {\n"
-    manifest_json+="      \"name\": \"recovery.bin\",\n"
-    manifest_json+="      \"hash\": \"0x${recovery_hash}\"\n"
-    manifest_json+="    },\n"
-else
-    echo "Warning: Recovery image not found, using placeholder in manifest"
-    manifest_json+="    {\n"
-    manifest_json+="      \"name\": \"recovery.bin\",\n"
-    manifest_json+="      \"hash\": \"0x0000000000000000000000000000000000000000000000000000000000000000\"\n"
-    manifest_json+="    },\n"
+# Check for required files
+if [ ! -f "${VERSION_FOLDER}/recovery.bin" ]; then
+    echo "Error: Recovery image (${VERSION_FOLDER}/recovery.bin) not found"
+    echo "This file is required for signing. Aborting."
+    exit 1
 fi
 
-# Add app.bin to manifest if it exists
-if [ -f "${VERSION_FOLDER}/app.bin" ]; then
-    app_hash=$(${HASH_CMD} ${VERSION_FOLDER}/app.bin | cut -d' ' -f${HASH_CUT_FIELD})
-    manifest_json+="    {\n"
-    manifest_json+="      \"name\": \"app.bin\",\n"
-    manifest_json+="      \"hash\": \"0x${app_hash}\"\n"
-    manifest_json+="    }"
-else
-    echo "Warning: Main firmware image not found, using placeholder in manifest"
-    manifest_json+="    {\n"
-    manifest_json+="      \"name\": \"app.bin\",\n"
-    manifest_json+="      \"hash\": \"0x0000000000000000000000000000000000000000000000000000000000000000\"\n"
-    manifest_json+="    }"
+if [ ! -f "${VERSION_FOLDER}/app.bin" ]; then
+    echo "Error: Main firmware image (${VERSION_FOLDER}/app.bin) not found"
+    echo "This file is required for signing. Aborting."
+    exit 1
 fi
+
+# Add recovery.bin to manifest
+recovery_hash=$(${HASH_CMD} ${VERSION_FOLDER}/recovery.bin | cut -d' ' -f${HASH_CUT_FIELD})
+manifest_json+="    {\n"
+manifest_json+="      \"name\": \"recovery.bin\",\n"
+manifest_json+="      \"hash\": \"0x${recovery_hash}\"\n"
+manifest_json+="    },\n"
+
+# Add app.bin to manifest
+app_hash=$(${HASH_CMD} ${VERSION_FOLDER}/app.bin | cut -d' ' -f${HASH_CUT_FIELD})
+manifest_json+="    {\n"
+manifest_json+="      \"name\": \"app.bin\",\n"
+manifest_json+="      \"hash\": \"0x${app_hash}\"\n"
+manifest_json+="    }"
 
 # Add each app to manifest
 app_count=0
