@@ -1,9 +1,31 @@
 #!/bin/bash
 set -e
 
-VERSION=$1
-CONFIG_PATH=$2
+# Parse command and arguments
+COMMAND=$1
+VERSION=$2
+CONFIG_PATH=$3
 VERSION_FOLDER="${VERSION}"
+
+# Show usage if no command is provided
+if [ -z "$COMMAND" ]; then
+    echo "Error: Command not specified"
+    echo "Usage: $0 <command> <version> [config_path]"
+    echo "Commands:"
+    echo "  sign-files   - Sign individual files with the provided key"
+    echo "  create-tar   - Create tar file (only when all files have two signatures)"
+    echo "  sign-tar     - Sign the tar file with the provided key"
+    echo "  sign-all     - Do all steps in one (for backward compatibility)"
+    exit 1
+fi
+
+# Show usage if no version is provided
+if [ -z "$VERSION" ]; then
+    echo "Error: Version not specified"
+    echo "Usage: $0 $COMMAND <version> [config_path]"
+    exit 1
+fi
+
 # Remove any 'v' prefix from VERSION for consistency
 if [[ "${VERSION}" == v* ]]; then
     VERSION="${VERSION#v}"
@@ -28,8 +50,9 @@ if [ -z "$VERSION" ]; then
 fi
 
 # Use default config path if not provided
-if [ -z "$CONFIG_PATH" ]; then
+if [ -z "$CONFIG_PATH" ] && [ "$COMMAND" != "create-tar" ]; then
     CONFIG_PATH="~/cosign2.toml"
+    echo "No config path provided, using default: $CONFIG_PATH"
 fi
 
 # Remove 'v' prefix from version for cosign2 --firmware-version parameter
@@ -39,118 +62,173 @@ if [[ "${FIRMWARE_VERSION}" == v* ]]; then
     FIRMWARE_VERSION="${FIRMWARE_VERSION#v}"
 fi
 
-echo "Signing files for version $VERSION"
-
 # Check if version folder exists
 if [ ! -d "${VERSION_FOLDER}" ]; then
     echo "Error: Version folder ${VERSION_FOLDER} does not exist"
     exit 1
 fi
 
-# Sign the recovery image
-if [ -f "${VERSION_FOLDER}/recovery.bin" ]; then
+# Function to check if a file has two signatures
+check_signatures() {
+    local file=$1
+    local file_name=$(basename "$file")
+
+    # Run cosign2 dump and capture output
+    dump_output=$(cosign2 dump --input "$file" 2>&1)
+    dump_status=$?
+
+    # Check if the file has no header or only one signature
+    if [ $dump_status -ne 0 ] || echo "$dump_output" | grep -q "no header found"; then
+        echo "Error: $file_name has no signatures"
+        return 1
+    elif echo "$dump_output" | grep -q "signature2.*0000000000000000000000000000000000000000000000000000000000000000"; then
+        echo "Error: $file_name has only one signature"
+        return 1
+    elif echo "$dump_output" | grep -q "signature1.*0000000000000000000000000000000000000000000000000000000000000000"; then
+        echo "Error: $file_name has a header but no valid signatures"
+        return 1
+    else
+        echo "$file_name has two signatures"
+        return 0
+    fi
+}
+
+# Function to sign individual files
+sign_files() {
+    echo "Signing individual files for version $VERSION"
+
+    # Check for required files
+    if [ ! -f "${VERSION_FOLDER}/recovery.bin" ]; then
+        echo "Error: Recovery image (${VERSION_FOLDER}/recovery.bin) not found"
+        echo "This file is required for signing. Aborting."
+        exit 1
+    fi
+
+    if [ ! -f "${VERSION_FOLDER}/app.bin" ]; then
+        echo "Error: Main firmware image (${VERSION_FOLDER}/app.bin) not found"
+        echo "This file is required for signing. Aborting."
+        exit 1
+    fi
+
+    # Sign the recovery image
     echo "Signing recovery image..."
     echo "  File: ${VERSION_FOLDER}/recovery.bin"
     echo "  Config path: ${CONFIG_PATH}"
     echo "  Firmware version: ${FIRMWARE_VERSION}"
     cosign2 sign -i ${VERSION_FOLDER}/recovery.bin -c ${CONFIG_PATH} --in-place --firmware-version "${FIRMWARE_VERSION}"
-else
-    echo "Warning: Recovery image ${VERSION_FOLDER}/recovery.bin not found"
-fi
 
-# Sign the main firmware image
-if [ -f "${VERSION_FOLDER}/app.bin" ]; then
+    # Sign the main firmware image
     echo "Signing main firmware image..."
     cosign2 sign -i ${VERSION_FOLDER}/app.bin -c ${CONFIG_PATH} --in-place --firmware-version "${FIRMWARE_VERSION}"
-else
-    echo "Warning: Main firmware image ${VERSION_FOLDER}/app.bin not found"
-fi
 
-# Sign each dynamically loadable app
-echo "Looking for dynamically loadable apps in ${VERSION_FOLDER}/apps/..."
-if ls ${VERSION_FOLDER}/apps/gui-app*.elf 1> /dev/null 2>&1; then
-    for app in ${VERSION_FOLDER}/apps/gui-app*.elf; do
-        app_name=$(basename "$app")
-        echo "Signing app: $app_name..."
-        cosign2 sign -i "$app" -c ${CONFIG_PATH} --in-place --firmware-version "${FIRMWARE_VERSION}"
-    done
-else
-    echo "No dynamically loadable apps found in ${VERSION_FOLDER}/apps/"
-fi
+    # Sign each dynamically loadable app
+    echo "Looking for dynamically loadable apps in ${VERSION_FOLDER}/apps/..."
+    if ls ${VERSION_FOLDER}/apps/gui-app*.elf 1> /dev/null 2>&1; then
+        for app in ${VERSION_FOLDER}/apps/gui-app*.elf; do
+            app_name=$(basename "$app")
+            echo "Signing app: $app_name..."
+            cosign2 sign -i "$app" -c ${CONFIG_PATH} --in-place --firmware-version "${FIRMWARE_VERSION}"
+        done
+    else
+        echo "No dynamically loadable apps found in ${VERSION_FOLDER}/apps/"
+    fi
 
-# Generate manifest file
-echo "Generating manifest file..."
-manifest_file="${VERSION_FOLDER}/manifest.json"
+    echo "Individual file signing complete for version $VERSION"
+}
 
-# Start building the manifest JSON as a string
-manifest_json="{\n"
-manifest_json+="  \"version\": \"v${VERSION}\",\n"
-manifest_json+="  \"files\": [\n"
+# Function to generate manifest file
+generate_manifest() {
+    echo "Generating manifest file..."
+    manifest_file="${VERSION_FOLDER}/manifest.json"
 
-# Check for required files
-if [ ! -f "${VERSION_FOLDER}/recovery.bin" ]; then
-    echo "Error: Recovery image (${VERSION_FOLDER}/recovery.bin) not found"
-    echo "This file is required for signing. Aborting."
-    exit 1
-fi
+    # Start building the manifest JSON as a string
+    manifest_json="{\n"
+    manifest_json+="  \"version\": \"v${VERSION}\",\n"
+    manifest_json+="  \"files\": [\n"
 
-if [ ! -f "${VERSION_FOLDER}/app.bin" ]; then
-    echo "Error: Main firmware image (${VERSION_FOLDER}/app.bin) not found"
-    echo "This file is required for signing. Aborting."
-    exit 1
-fi
+    # Add recovery.bin to manifest
+    recovery_hash=$(${HASH_CMD} ${VERSION_FOLDER}/recovery.bin | cut -d' ' -f${HASH_CUT_FIELD})
+    manifest_json+="    {\n"
+    manifest_json+="      \"name\": \"recovery.bin\",\n"
+    manifest_json+="      \"hash\": \"0x${recovery_hash}\"\n"
+    manifest_json+="    },\n"
 
-# Add recovery.bin to manifest
-recovery_hash=$(${HASH_CMD} ${VERSION_FOLDER}/recovery.bin | cut -d' ' -f${HASH_CUT_FIELD})
-manifest_json+="    {\n"
-manifest_json+="      \"name\": \"recovery.bin\",\n"
-manifest_json+="      \"hash\": \"0x${recovery_hash}\"\n"
-manifest_json+="    },\n"
+    # Add app.bin to manifest
+    app_hash=$(${HASH_CMD} ${VERSION_FOLDER}/app.bin | cut -d' ' -f${HASH_CUT_FIELD})
+    manifest_json+="    {\n"
+    manifest_json+="      \"name\": \"app.bin\",\n"
+    manifest_json+="      \"hash\": \"0x${app_hash}\"\n"
+    manifest_json+="    }"
 
-# Add app.bin to manifest
-app_hash=$(${HASH_CMD} ${VERSION_FOLDER}/app.bin | cut -d' ' -f${HASH_CUT_FIELD})
-manifest_json+="    {\n"
-manifest_json+="      \"name\": \"app.bin\",\n"
-manifest_json+="      \"hash\": \"0x${app_hash}\"\n"
-manifest_json+="    }"
+    # Add each app to manifest
+    app_count=0
+    if ls ${VERSION_FOLDER}/apps/gui-app*.elf 1> /dev/null 2>&1; then
+        for app in ${VERSION_FOLDER}/apps/gui-app*.elf; do
+            app_name=$(basename "$app")
+            app_hash=$(${HASH_CMD} "$app" | cut -d' ' -f${HASH_CUT_FIELD})
 
-# Add each app to manifest
-app_count=0
-if ls ${VERSION_FOLDER}/apps/gui-app*.elf 1> /dev/null 2>&1; then
-    for app in ${VERSION_FOLDER}/apps/gui-app*.elf; do
-        app_name=$(basename "$app")
-        app_hash=$(${HASH_CMD} "$app" | cut -d' ' -f${HASH_CUT_FIELD})
+            # Add a comma before adding a new entry (after app.bin or previous app)
+            manifest_json+=",\n"
 
-        # Add a comma before adding a new entry (after app.bin or previous app)
-        manifest_json+=",\n"
+            manifest_json+="    {\n"
+            manifest_json+="      \"name\": \"apps/${app_name}\",\n"
+            manifest_json+="      \"hash\": \"0x${app_hash}\"\n"
+            manifest_json+="    }"
 
-        manifest_json+="    {\n"
-        manifest_json+="      \"name\": \"apps/${app_name}\",\n"
-        manifest_json+="      \"hash\": \"0x${app_hash}\"\n"
-        manifest_json+="    }"
+            app_count=$((app_count + 1))
+        done
+        echo "Added $app_count dynamically loadable apps to manifest"
+    else
+        echo "No dynamically loadable apps to add to manifest"
+    fi
 
-        app_count=$((app_count + 1))
-    done
-    echo "Added $app_count dynamically loadable apps to manifest"
-else
-    echo "No dynamically loadable apps to add to manifest"
-fi
+    # Close the JSON structure
+    manifest_json+="\n  ]\n"
+    manifest_json+="}\n"
 
-# Close the JSON structure
-manifest_json+="\n  ]\n"
-manifest_json+="}\n"
+    # Write the manifest to file
+    echo -e "$manifest_json" > "$manifest_file"
+    echo "Manifest file created at $manifest_file"
+}
 
-# Write the manifest to file
-echo -e "$manifest_json" > "$manifest_file"
-echo "Manifest file created at $manifest_file"
+# Function to create tar file
+create_tar() {
+    echo "Creating tar file for version $VERSION"
 
-# Check if tar file already exists
-tar_file="${VERSION_FOLDER}/KeyOS-v${VERSION}.bin"
-if [ -f "$tar_file" ]; then
-    echo "Tar file already exists. Will sign the existing tar file."
-else
+    # Check if all files have the required signatures
+    echo "Checking signatures on individual files..."
+
+    # Check recovery.bin and app.bin
+    all_signed=true
+    if ! check_signatures "${VERSION_FOLDER}/recovery.bin"; then
+        all_signed=false
+    fi
+    if ! check_signatures "${VERSION_FOLDER}/app.bin"; then
+        all_signed=false
+    fi
+
+    # Check all app files
+    if ls ${VERSION_FOLDER}/apps/gui-app*.elf 1> /dev/null 2>&1; then
+        for app in ${VERSION_FOLDER}/apps/gui-app*.elf; do
+            if ! check_signatures "$app"; then
+                all_signed=false
+            fi
+        done
+    fi
+
+    # Only proceed with tar file creation if all files are properly signed
+    if [ "$all_signed" = false ]; then
+        echo "Error: Not all files have two signatures. Please sign all files with two keys before creating the tar file."
+        exit 1
+    fi
+
+    # Generate manifest file
+    generate_manifest
+
     # Create tar file
+    tar_file="${VERSION_FOLDER}/KeyOS-v${VERSION}.bin"
     echo "Creating tar file..."
+
     # Check if there are any files to include in the tar
     files_to_tar=""
     if ls ${VERSION_FOLDER}/*.bin 1> /dev/null 2>&1; then
@@ -168,17 +246,30 @@ else
         tar -cf "$tar_file" ${VERSION_FOLDER}/*.bin ${VERSION_FOLDER}/apps/*.elf ${VERSION_FOLDER}/manifest.json 2>/dev/null || true
 
         if [ ! -f "$tar_file" ]; then
-            echo "Warning: Failed to create tar file"
+            echo "Error: Failed to create tar file"
             exit 1
+        else
+            echo "Tar file created successfully: $tar_file"
         fi
     else
-        echo "Warning: No files found to include in tar file"
+        echo "Error: No files found to include in tar file"
         exit 1
     fi
-fi
+}
 
-# Sign the final tar file
-if [ -f "$tar_file" ]; then
+# Function to sign tar file
+sign_tar() {
+    echo "Signing tar file for version $VERSION"
+
+    tar_file="${VERSION_FOLDER}/KeyOS-v${VERSION}.bin"
+
+    # Check if tar file exists
+    if [ ! -f "$tar_file" ]; then
+        echo "Error: Tar file not found: $tar_file"
+        echo "Please run 'create-tar' command first."
+        exit 1
+    fi
+
     echo "Checking existing signatures on tar file..."
 
     # Run cosign2 dump and capture output and exit status
@@ -203,9 +294,24 @@ if [ -f "$tar_file" ]; then
         echo "Current signatures:"
         echo "$dump_output" | grep -E "pubkey|signature"
     fi
-else
-    echo "Error: Tar file not found"
-    exit 1
-fi
 
-echo "Signing complete for version $VERSION"
+    echo "Tar file signing complete for version $VERSION"
+}
+
+# Execute the appropriate function based on the command
+case "$COMMAND" in
+    sign-files)
+        sign_files
+        ;;
+    create-tar)
+        create_tar
+        ;;
+    sign-tar)
+        sign_tar
+        ;;
+    *)
+        echo "Error: Unknown command: $COMMAND"
+        echo "Valid commands: sign-files, create-tar, sign-tar"
+        exit 1
+        ;;
+esac
