@@ -81,58 +81,71 @@ fi
 # Generate manifest file
 echo "Generating manifest file..."
 manifest_file="${VERSION_FOLDER}/manifest.json"
-echo "{" > $manifest_file
-echo "  \"version\": \"v${VERSION}\"," >> $manifest_file
-echo "  \"files\": [" >> $manifest_file
+
+# Start building the manifest JSON as a string
+manifest_json="{\n"
+manifest_json+="  \"version\": \"v${VERSION}\",\n"
+manifest_json+="  \"files\": [\n"
 
 # Add recovery.bin to manifest if it exists
 if [ -f "${VERSION_FOLDER}/recovery.bin" ]; then
     recovery_hash=$(${HASH_CMD} ${VERSION_FOLDER}/recovery.bin | cut -d' ' -f${HASH_CUT_FIELD})
-    echo "    {" >> $manifest_file
-    echo "      \"name\": \"recovery.bin\"," >> $manifest_file
-    echo "      \"hash\": \"0x${recovery_hash}\"" >> $manifest_file
-    echo "    }," >> $manifest_file
+    manifest_json+="    {\n"
+    manifest_json+="      \"name\": \"recovery.bin\",\n"
+    manifest_json+="      \"hash\": \"0x${recovery_hash}\"\n"
+    manifest_json+="    },\n"
 else
-    echo "Warning: Recovery image not found, skipping in manifest"
-    echo "    {" >> $manifest_file
-    echo "      \"name\": \"recovery.bin\"," >> $manifest_file
-    echo "      \"hash\": \"0x0000000000000000000000000000000000000000000000000000000000000000\"" >> $manifest_file
-    echo "    }," >> $manifest_file
+    echo "Warning: Recovery image not found, using placeholder in manifest"
+    manifest_json+="    {\n"
+    manifest_json+="      \"name\": \"recovery.bin\",\n"
+    manifest_json+="      \"hash\": \"0x0000000000000000000000000000000000000000000000000000000000000000\"\n"
+    manifest_json+="    },\n"
 fi
 
 # Add app.bin to manifest if it exists
 if [ -f "${VERSION_FOLDER}/app.bin" ]; then
     app_hash=$(${HASH_CMD} ${VERSION_FOLDER}/app.bin | cut -d' ' -f${HASH_CUT_FIELD})
-    echo "    {" >> $manifest_file
-    echo "      \"name\": \"app.bin\"," >> $manifest_file
-    echo "      \"hash\": \"0x${app_hash}\"" >> $manifest_file
-    echo "    }" >> $manifest_file
+    manifest_json+="    {\n"
+    manifest_json+="      \"name\": \"app.bin\",\n"
+    manifest_json+="      \"hash\": \"0x${app_hash}\"\n"
+    manifest_json+="    }"
 else
-    echo "Warning: Main firmware image not found, skipping in manifest"
-    echo "    {" >> $manifest_file
-    echo "      \"name\": \"app.bin\"," >> $manifest_file
-    echo "      \"hash\": \"0x0000000000000000000000000000000000000000000000000000000000000000\"" >> $manifest_file
-    echo "    }" >> $manifest_file
+    echo "Warning: Main firmware image not found, using placeholder in manifest"
+    manifest_json+="    {\n"
+    manifest_json+="      \"name\": \"app.bin\",\n"
+    manifest_json+="      \"hash\": \"0x0000000000000000000000000000000000000000000000000000000000000000\"\n"
+    manifest_json+="    }"
 fi
 
 # Add each app to manifest
+app_count=0
 if ls ${VERSION_FOLDER}/apps/gui-app*.elf 1> /dev/null 2>&1; then
     for app in ${VERSION_FOLDER}/apps/gui-app*.elf; do
         app_name=$(basename "$app")
         app_hash=$(${HASH_CMD} "$app" | cut -d' ' -f${HASH_CUT_FIELD})
 
-        echo "    ," >> $manifest_file
-        echo "    {" >> $manifest_file
-        echo "      \"name\": \"apps/${app_name}\"," >> $manifest_file
-        echo "      \"hash\": \"0x${app_hash}\"" >> $manifest_file
-        echo "    }" >> $manifest_file
+        # Add a comma before adding a new entry (after app.bin or previous app)
+        manifest_json+=",\n"
+
+        manifest_json+="    {\n"
+        manifest_json+="      \"name\": \"apps/${app_name}\",\n"
+        manifest_json+="      \"hash\": \"0x${app_hash}\"\n"
+        manifest_json+="    }"
+
+        app_count=$((app_count + 1))
     done
+    echo "Added $app_count dynamically loadable apps to manifest"
 else
     echo "No dynamically loadable apps to add to manifest"
 fi
 
-echo "  ]" >> $manifest_file
-echo "}" >> $manifest_file
+# Close the JSON structure
+manifest_json+="\n  ]\n"
+manifest_json+="}\n"
+
+# Write the manifest to file
+echo -e "$manifest_json" > "$manifest_file"
+echo "Manifest file created at $manifest_file"
 
 # Check if tar file already exists
 tar_file="${VERSION_FOLDER}/KeyOS-v${VERSION}.bin"
