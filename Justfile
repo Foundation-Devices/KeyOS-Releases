@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # Sign individual files with the provided key
-sign-files VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
+sign VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
     @echo "Signing all files for version {{VERSION}} with config {{CONFIG_PATH}}"
     cargo run --manifest-path tools/signer/Cargo.toml -- sign-files {{VERSION}} {{CONFIG_PATH}}
 
@@ -15,3 +15,16 @@ create-tar VERSION:
 sign-tar VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
     @echo "Signing tar file for version {{VERSION}} with config {{CONFIG_PATH}}"
     cargo run --manifest-path tools/signer/Cargo.toml -- sign-tar {{VERSION}} {{CONFIG_PATH}}
+
+# Unsign all files for a version by resetting them to their original state
+unsign VERSION:
+    @echo "Unsigning all files for version {{VERSION}} (git reset)"
+    @echo "Resetting main firmware and recovery images..."
+    git checkout -- v{{VERSION}}/app.bin v{{VERSION}}/recovery.bin
+    @echo "Resetting app files..."
+    git checkout -- v{{VERSION}}/apps/*.elf
+    @echo "Removing tar file if it exists..."
+    rm -f v{{VERSION}}/KeyOS-v{{VERSION}}.bin
+    @echo "Removing manifest file if it exists..."
+    rm -f v{{VERSION}}/manifest.json
+    @echo "✓ All files have been reset to their unsigned state"

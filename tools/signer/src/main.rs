@@ -395,21 +395,45 @@ fn create_tar(version_folder: &str, firmware_version: &str) -> Result<()> {
         Path::new(&tar_file).file_name().unwrap().to_string_lossy()
     );
 
-    // Build the tar command
-    let mut tar_cmd = Command::new("tar");
-    tar_cmd.args(["-cf", &tar_file]);
+    // Collect all files to include in the tar
+    let mut files_to_include = Vec::new();
 
-    // Add .bin files
-    let bin_pattern = format!("{}/*.bin", version_folder);
-    tar_cmd.arg(&bin_pattern);
-
-    // Add .elf files
-    let elf_pattern = format!("{}/apps/*.elf", version_folder);
-    tar_cmd.arg(&elf_pattern);
+    // Add recovery.bin and app.bin
+    let recovery_bin = format!("{}/recovery.bin", version_folder);
+    let app_bin = format!("{}/app.bin", version_folder);
+    files_to_include.push(recovery_bin);
+    files_to_include.push(app_bin);
 
     // Add manifest.json
     let manifest_file = format!("{}/manifest.json", version_folder);
-    tar_cmd.arg(&manifest_file);
+    files_to_include.push(manifest_file.clone());
+
+    // Add all .elf files in the apps directory
+    let apps_dir = format!("{}/apps", version_folder);
+    let apps_path = Path::new(&apps_dir);
+    if apps_path.is_dir() {
+        for entry in fs::read_dir(apps_path).context("Failed to read apps directory")? {
+            let entry = entry.context("Failed to read directory entry")?;
+            let path = entry.path();
+
+            if path.is_file() && path.extension().map_or(false, |ext| ext == "elf") {
+                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                    if file_name.starts_with("gui-app") {
+                        files_to_include.push(path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Build the tar command with explicit file list
+    let mut tar_cmd = Command::new("tar");
+    tar_cmd.arg("-cf").arg(&tar_file);
+
+    // Add all collected files
+    for file in &files_to_include {
+        tar_cmd.arg(file);
+    }
 
     // Execute the tar command
     let output = tar_cmd.output().context("Failed to execute tar command")?;
