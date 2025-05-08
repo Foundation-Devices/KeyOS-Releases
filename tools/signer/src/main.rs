@@ -63,6 +63,12 @@ enum Commands {
         #[arg(default_value = "~/cosign2.toml")]
         config_path: String,
     },
+
+    /// Validate that all files for a version are properly signed
+    Validate {
+        /// Version number (e.g., 1.0.2 or v1.0.2)
+        version: String,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -109,6 +115,11 @@ fn main() -> Result<()> {
             let version_folder = normalize_version(version)?;
             let firmware_version = strip_v_prefix(version);
             sign_tar(&version_folder, config_path, &firmware_version)?;
+        }
+        Commands::Validate { version } => {
+            let version_folder = normalize_version(version)?;
+            let firmware_version = strip_v_prefix(version);
+            validate(&version_folder, &firmware_version)?;
         }
     }
 
@@ -554,6 +565,144 @@ fn sign_tar(version_folder: &str, config_path: &str, firmware_version: &str) -> 
             .green()
             .bold()
     );
+    Ok(())
+}
+
+fn validate(version_folder: &str, firmware_version: &str) -> Result<()> {
+    println!(
+        "{}",
+        format!("Validating signatures for version {}", firmware_version).bold()
+    );
+
+    // Check if version folder exists
+    if !Path::new(version_folder).is_dir() {
+        println!("{} Version folder not found: {}", "✗".red(), version_folder);
+        return Err(SignerError::DirectoryNotFound(version_folder.to_string()).into());
+    }
+
+    println!("Checking required files and signatures...");
+
+    let mut all_valid = true;
+    let mut missing_files = Vec::new();
+    let mut unsigned_files = Vec::new();
+
+    // Check recovery.bin
+    let recovery_bin = format!("{}/recovery.bin", version_folder);
+    if !Path::new(&recovery_bin).exists() {
+        println!("  {} recovery.bin is missing", "✗".red());
+        missing_files.push("recovery.bin".to_string());
+        all_valid = false;
+    } else {
+        let recovery_status = check_signatures(&recovery_bin)?;
+        if !recovery_status.has_second_signature {
+            unsigned_files.push("recovery.bin".to_string());
+            all_valid = false;
+        }
+    }
+
+    // Check app.bin
+    let app_bin = format!("{}/app.bin", version_folder);
+    if !Path::new(&app_bin).exists() {
+        println!("  {} app.bin is missing", "✗".red());
+        missing_files.push("app.bin".to_string());
+        all_valid = false;
+    } else {
+        let app_status = check_signatures(&app_bin)?;
+        if !app_status.has_second_signature {
+            unsigned_files.push("app.bin".to_string());
+            all_valid = false;
+        }
+    }
+
+    // Check manifest.json
+    let manifest_file = format!("{}/manifest.json", version_folder);
+    if !Path::new(&manifest_file).exists() {
+        println!("  {} manifest.json is missing", "✗".red());
+        missing_files.push("manifest.json".to_string());
+        all_valid = false;
+    }
+
+    // Check all app files
+    let apps_dir = format!("{}/apps", version_folder);
+    let apps_path = Path::new(&apps_dir);
+
+    if !apps_path.is_dir() {
+        println!("  {} apps directory is missing", "✗".red());
+        missing_files.push("apps/".to_string());
+        all_valid = false;
+    } else {
+        let mut app_count = 0;
+
+        for entry in fs::read_dir(apps_path).context("Failed to read apps directory")? {
+            let entry = entry.context("Failed to read directory entry")?;
+            let path = entry.path();
+
+            if path.is_file() && path.extension().map_or(false, |ext| ext == "elf") {
+                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                    if file_name.starts_with("gui-app") {
+                        app_count += 1;
+                        let app_path = path.to_str().unwrap();
+                        let app_status = check_signatures(app_path)?;
+                        if !app_status.has_second_signature {
+                            unsigned_files.push(format!("apps/{}", file_name));
+                            all_valid = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        if app_count == 0 {
+            println!("  {} No app files found in apps directory", "⚠".yellow());
+        }
+    }
+
+    // Check KeyOS tar file
+    let tar_file = format!("{}/KeyOS-v{}.bin", version_folder, firmware_version);
+    if !Path::new(&tar_file).exists() {
+        println!("  {} KeyOS-v{}.bin is missing", "✗".red(), firmware_version);
+        missing_files.push(format!("KeyOS-v{}.bin", firmware_version));
+        all_valid = false;
+    } else {
+        let tar_status = check_signatures(&tar_file)?;
+        if !tar_status.has_second_signature {
+            unsigned_files.push(format!("KeyOS-v{}.bin", firmware_version));
+            all_valid = false;
+        }
+    }
+
+    // Print summary
+    println!("\nValidation Summary:");
+
+    if !missing_files.is_empty() {
+        println!("{} Missing files:", "✗".red());
+        for file in missing_files {
+            println!("  - {}", file);
+        }
+    }
+
+    if !unsigned_files.is_empty() {
+        println!("{} Files without two signatures:", "✗".red());
+        for file in unsigned_files {
+            println!("  - {}", file);
+        }
+    }
+
+    if all_valid {
+        println!(
+            "\n{} {}",
+            "✓".green().bold(),
+            "All files exist and have two signatures.".green().bold()
+        );
+    } else {
+        println!(
+            "\n{} {}",
+            "✗".red().bold(),
+            "Validation failed. See issues above.".red().bold()
+        );
+        return Err(anyhow::anyhow!("Validation failed"));
+    }
+
     Ok(())
 }
 
