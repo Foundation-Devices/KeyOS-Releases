@@ -156,53 +156,11 @@ fn sign_files(version_folder: &str, config_path: &str, firmware_version: &str) -
     }
 
     // Check for required files
-    let recovery_bin = format!("{}/recovery.bin", version_folder);
     let app_bin = format!("{}/app.bin", version_folder);
-
-    if !Path::new(&recovery_bin).exists() {
-        return Err(SignerError::FileNotFound(recovery_bin).into());
-    }
 
     if !Path::new(&app_bin).exists() {
         return Err(SignerError::FileNotFound(app_bin).into());
     }
-
-    // Sign recovery.bin
-    print!(
-        "Signing recovery image ({})...",
-        Path::new(&recovery_bin)
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-    );
-
-    debug!("  File: {}", recovery_bin);
-    debug!("  Config path: {}", config_path);
-    debug!("  Firmware version: {}", firmware_version);
-
-    let output = Command::new("cosign2")
-        .args([
-            "sign",
-            "-i",
-            &recovery_bin,
-            "-c",
-            config_path,
-            "--in-place",
-            "--firmware-version",
-            firmware_version,
-        ])
-        .output()
-        .context(format!("{} cosign2 error", "✗".red()))?;
-
-    if !output.status.success() {
-        println!("{} Failed to sign", "✗".red());
-        return Err(SignerError::CommandFailed(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        )
-        .into());
-    }
-
-    println!("{}", "✓ Success".green());
 
     // Sign app.bin
     print!(
@@ -332,18 +290,10 @@ fn create_tar(version_folder: &str, firmware_version: &str) -> Result<()> {
 
     println!("Checking signatures on all files...");
 
-    // Check recovery.bin and app.bin
-    let recovery_bin = format!("{}/recovery.bin", version_folder);
     let app_bin = format!("{}/app.bin", version_folder);
 
     let mut all_signed = true;
     let mut unsigned_files = Vec::new();
-
-    let recovery_status = check_signatures(&recovery_bin)?;
-    if !recovery_status.has_second_signature {
-        all_signed = false;
-        unsigned_files.push("recovery.bin".to_string());
-    }
 
     let app_status = check_signatures(&app_bin)?;
     if !app_status.has_second_signature {
@@ -409,10 +359,8 @@ fn create_tar(version_folder: &str, firmware_version: &str) -> Result<()> {
     // Collect all files to include in the tar
     let mut files_to_include = Vec::new();
 
-    // Add recovery.bin and app.bin
-    let recovery_bin = format!("{}/recovery.bin", version_folder);
+    // Add app.bin
     let app_bin = format!("{}/app.bin", version_folder);
-    files_to_include.push(recovery_bin);
     files_to_include.push(app_bin);
 
     // Add manifest.json
@@ -585,20 +533,6 @@ fn validate(version_folder: &str, firmware_version: &str) -> Result<()> {
     let mut all_valid = true;
     let mut missing_files = Vec::new();
     let mut unsigned_files = Vec::new();
-
-    // Check recovery.bin
-    let recovery_bin = format!("{}/recovery.bin", version_folder);
-    if !Path::new(&recovery_bin).exists() {
-        println!("  {} recovery.bin is missing", "✗".red());
-        missing_files.push("recovery.bin".to_string());
-        all_valid = false;
-    } else {
-        let recovery_status = check_signatures(&recovery_bin)?;
-        if !recovery_status.has_second_signature {
-            unsigned_files.push("recovery.bin".to_string());
-            all_valid = false;
-        }
-    }
 
     // Check app.bin
     let app_bin = format!("{}/app.bin", version_folder);
@@ -778,14 +712,6 @@ fn generate_manifest(version_folder: &str, firmware_version: &str) -> Result<()>
         version: format!("v{}", firmware_version),
         files: Vec::new(),
     };
-
-    // Add recovery.bin to manifest
-    let recovery_bin = format!("{}/recovery.bin", version_folder);
-    let recovery_hash = calculate_hash(&recovery_bin)?;
-    manifest.files.push(FileEntry {
-        name: "recovery.bin".to_string(),
-        hash: format!("0x{}", recovery_hash),
-    });
 
     // Add app.bin to manifest
     let app_bin = format!("{}/app.bin", version_folder);
