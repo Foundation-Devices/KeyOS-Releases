@@ -1,0 +1,15 @@
+{
+  "appName": {
+    "en": "LED Control"
+  },
+  "appDescription": {},
+  "appId": "0x6775692d6170702d6c65642d636f6e74",
+  "appSignature": "0x00",
+  "servers": [],
+  "permissions": [
+    {
+      "server": "os/gui-server",
+      "messages": "0..128"
+    }
+  ]
+}

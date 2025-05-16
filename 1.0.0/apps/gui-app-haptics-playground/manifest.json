@@ -1,0 +1,15 @@
+{
+  "appName": {
+    "en": "Haptics Playground"
+  },
+  "appDescription": {},
+  "appId": "0x6775692d6170702d686170746963732d",
+  "appSignature": "0x00",
+  "servers": [],
+  "permissions": [
+    {
+      "server": "os/gui-server",
+      "messages": "0..128"
+    }
+  ]
+}
