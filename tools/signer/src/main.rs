@@ -179,7 +179,7 @@ fn sign_files(version_folder: &str, config_path: &str, firmware_version: &str) -
 
     // Sign app.bin
     print!(
-        "Signing main firmware image ({})...",
+        "Signing KeyOS image ({})...",
         Path::new(&app_bin).file_name().unwrap().to_string_lossy()
     );
 
@@ -300,7 +300,12 @@ fn create_tar(
 ) -> Result<()> {
     println!(
         "{}",
-        format!("Creating tar file for version {}", firmware_version).bold()
+        format!(
+            "Creating {}tar file for version {}",
+            if is_recovery { "recovery " } else { "" },
+            firmware_version
+        )
+        .bold()
     );
 
     // Check if version folder exists
@@ -369,7 +374,7 @@ fn create_tar(
     println!("{} Manifest file generated successfully", "✓".green());
 
     // Create tar file
-    let tar_file = format!("{}/KeyOS-v{}.bin", version_folder, firmware_version);
+    let tar_file = format!("{}/KeyOS-v{}.tar", version_folder, firmware_version);
 
     println!(
         "Creating tar file: {}...",
@@ -451,7 +456,7 @@ fn sign_tar(version_folder: &str, config_path: &str, firmware_version: &str) -> 
         format!("Signing tar file for version {}", firmware_version).bold()
     );
 
-    let tar_file = format!("{}/KeyOS-v{}.bin", version_folder, firmware_version);
+    let tar_file = format!("{}/KeyOS-v{}.tar", version_folder, firmware_version);
 
     // Check if tar file exists
     if !Path::new(&tar_file).exists() {
@@ -612,15 +617,15 @@ fn validate(version_folder: &str, firmware_version: &str) -> Result<()> {
     }
 
     // Check KeyOS tar file
-    let tar_file = format!("{}/KeyOS-v{}.bin", version_folder, firmware_version);
+    let tar_file = format!("{}/KeyOS-v{}.tar", version_folder, firmware_version);
     if !Path::new(&tar_file).exists() {
-        println!("  {} KeyOS-v{}.bin is missing", "✗".red(), firmware_version);
-        missing_files.push(format!("KeyOS-v{}.bin", firmware_version));
+        println!("  {} KeyOS-v{}.tar is missing", "✗".red(), firmware_version);
+        missing_files.push(format!("KeyOS-v{}.tar", firmware_version));
         all_valid = false;
     } else {
         let tar_status = check_signatures(&tar_file)?;
         if !tar_status.has_second_signature {
-            unsigned_files.push(format!("KeyOS-v{}.bin", firmware_version));
+            unsigned_files.push(format!("KeyOS-v{}.tar", firmware_version));
             all_valid = false;
         }
     }
