@@ -1,4 +1,4 @@
-
 .DS_Store
-
 tools/signer/target/
+cosign2.toml
+.idea
