@@ -136,7 +136,7 @@ fn normalize_version(version: &str) -> Result<String> {
 }
 
 fn strip_v_prefix(version: &str) -> String {
-    // Remove 'v' prefix if present for cosign2 --firmware-version parameter
+    // Remove 'v' prefix if present for cosign2 --binary-version parameter
     if version.starts_with('v') {
         version[1..].to_string()
     } else {
@@ -176,7 +176,7 @@ fn sign_files(version_folder: &str, config_path: &str, firmware_version: &str) -
             "-c",
             config_path,
             "--in-place",
-            "--firmware-version",
+            "--binary-version",
             firmware_version,
         ])
         .output()
@@ -241,7 +241,7 @@ fn sign_files(version_folder: &str, config_path: &str, firmware_version: &str) -
                         "-c",
                         config_path,
                         "--in-place",
-                        "--firmware-version",
+                        "--binary-version",
                         firmware_version,
                     ])
                     .output()
@@ -490,7 +490,7 @@ fn sign_tar(version_folder: &str, config_path: &str, firmware_version: &str) -> 
             "-c",
             config_path,
             "--in-place",
-            "--firmware-version",
+            "--binary-version",
             firmware_version,
         ])
         .output()
