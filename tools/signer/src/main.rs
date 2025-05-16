@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use log::debug;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -52,6 +51,13 @@ enum Commands {
     CreateTar {
         /// Version number (e.g., 1.0.2 or v1.0.2)
         version: String,
+
+        /// Supply this argument to produce a tar file for the Firmware Recovery mode.
+        #[arg(long)]
+        recovery: bool,
+
+        #[arg(long)]
+        allow_one_signature: bool,
     },
 
     /// Sign the tar file with the provided key
@@ -103,10 +109,19 @@ fn main() -> Result<()> {
             let firmware_version = strip_v_prefix(version);
             sign_files(&version_folder, config_path, &firmware_version)?;
         }
-        Commands::CreateTar { version } => {
+        Commands::CreateTar {
+            version,
+            recovery,
+            allow_one_signature,
+        } => {
             let version_folder = normalize_version(version)?;
             let firmware_version = strip_v_prefix(version);
-            create_tar(&version_folder, &firmware_version)?;
+            create_tar(
+                &version_folder,
+                &firmware_version,
+                *recovery,
+                *allow_one_signature,
+            )?;
         }
         Commands::SignTar {
             version,
@@ -277,7 +292,12 @@ fn sign_files(version_folder: &str, config_path: &str, firmware_version: &str) -
     Ok(())
 }
 
-fn create_tar(version_folder: &str, firmware_version: &str) -> Result<()> {
+fn create_tar(
+    version_folder: &str,
+    firmware_version: &str,
+    is_recovery: bool,
+    allow_one_signature: bool,
+) -> Result<()> {
     println!(
         "{}",
         format!("Creating tar file for version {}", firmware_version).bold()
@@ -296,7 +316,7 @@ fn create_tar(version_folder: &str, firmware_version: &str) -> Result<()> {
     let mut unsigned_files = Vec::new();
 
     let app_status = check_signatures(&app_bin)?;
-    if !app_status.has_second_signature {
+    if !app_status.has_second_signature && !allow_one_signature {
         all_signed = false;
         unsigned_files.push("app.bin".to_string());
     }
@@ -327,7 +347,7 @@ fn create_tar(version_folder: &str, firmware_version: &str) -> Result<()> {
     }
 
     // Only proceed with tar file creation if all files are properly signed
-    if !all_signed {
+    if !all_signed && !allow_one_signature {
         println!("{} Some files don't have two signatures", "✗".red());
         println!(
             "{}",
@@ -339,7 +359,7 @@ fn create_tar(version_folder: &str, firmware_version: &str) -> Result<()> {
         return Err(SignerError::InsufficientSignatures.into());
     }
 
-    println!("{} All files have two signatures", "✓".green());
+    println!("{} All files have sufficient signatures", "✓".green());
 
     // Generate manifest file
     println!("Generating manifest file...");
