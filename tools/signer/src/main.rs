@@ -219,34 +219,30 @@ fn sign_files(version_folder: &str, config_path: &str, firmware_version: &str) -
     let apps_dir = format!("{}/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
 
-    let mut app_count = 0;
-
     if apps_path.is_dir() {
-        let mut app_files = Vec::new();
-
-        // Collect all app files first
+        let mut apps = Vec::new();
         for entry in fs::read_dir(apps_path).context("Failed to read apps directory")? {
             let entry = entry.context("Failed to read directory entry")?;
             let path = entry.path();
 
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "elf") {
-                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                    if file_name.starts_with("gui-app") {
-                        app_files.push((file_name.to_string(), path));
-                        app_count += 1;
-                    }
+            // Found an app dir, it should contain an app .elf and a manifest
+            if path.is_dir() {
+                let elf_path = path.clone().join("app.elf");
+                let manifest_path = path.clone().join("manifest.json");
+                if elf_path.exists() && manifest_path.exists() {
+                    apps.push((elf_path, manifest_path));
                 }
             }
         }
 
-        if app_count > 0 {
-            println!("Found {} dynamically loadable apps", app_count);
+        if !apps.is_empty() {
+            println!("Found {} dynamically loadable apps", apps.len());
 
             // Sign each app
-            for (file_name, path) in app_files {
-                print!("Signing app: {}...", file_name);
+            for (elf_path, _manifest_path) in apps {
+                print!("Signing app: {}...", elf_path.display());
 
-                let app_path = path.to_str().unwrap();
+                let app_path = elf_path.to_str().unwrap();
 
                 let output = Command::new("cosign2")
                     .args([
@@ -335,17 +331,13 @@ fn create_tar(
             let entry = entry.context("Failed to read directory entry")?;
             let path = entry.path();
 
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "elf") {
-                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                    if file_name.starts_with("gui-app") {
-                        let app_path = path.to_str().unwrap();
-                        let app_status = check_signatures(app_path)?;
-                        if !app_status.has_second_signature {
-                            all_signed = false;
-                            // Convert to owned String
-                            unsigned_files.push(file_name.to_string());
-                        }
-                    }
+            // Found an app dir, it should contain an app .elf and a manifest
+            if path.is_dir() {
+                let elf_path = format!("{}/app.elf", path.display());
+                let app_status = check_signatures(&elf_path)?;
+                if allow_one_signature && !app_status.has_second_signature {
+                    all_signed = false;
+                    unsigned_files.push(elf_path);
                 }
             }
         }
@@ -400,11 +392,13 @@ fn create_tar(
             let entry = entry.context("Failed to read directory entry")?;
             let path = entry.path();
 
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "elf") {
-                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                    if file_name.starts_with("gui-app") {
-                        files_to_include.push(path.to_string_lossy().to_string());
-                    }
+            // Found an app dir, it should contain an app .elf and a manifest
+            if path.is_dir() {
+                let elf_path = path.clone().join("app.elf");
+                let manifest_path = path.clone().join("manifest.json");
+                if elf_path.exists() && manifest_path.exists() {
+                    files_to_include.push(elf_path.to_string_lossy().to_string());
+                    files_to_include.push(manifest_path.to_string_lossy().to_string());
                 }
             }
         }
@@ -666,11 +660,6 @@ fn validate(version_folder: &str, firmware_version: &str) -> Result<()> {
 }
 
 fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
-    let file_name = Path::new(file_path)
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy();
-
     // Run cosign2 dump and capture output
     let output = Command::new("cosign2")
         .args(["dump", "--input", file_path])
@@ -685,7 +674,7 @@ fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
         || stderr.contains("no header found")
         || stdout.contains("no header found")
     {
-        println!("  {} {} has no signatures", "✗".red(), file_name);
+        println!("  {} {} has no signatures", "✗".red(), file_path);
         return Ok(SignatureStatus {
             has_header: false,
             has_first_signature: false,
@@ -694,9 +683,9 @@ fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
     }
 
     // Check for zero signatures in signature2
-    let re_sig2 = Regex::new(r"signature2.*0{64}").unwrap();
+    let re_sig2 = Regex::new(r"signature2.*0{64}")?;
     if re_sig2.is_match(&stdout) {
-        println!("  {} {} has only one signature", "⚠".yellow(), file_name);
+        println!("  {} {} has only one signature", "⚠".yellow(), file_path);
         return Ok(SignatureStatus {
             has_header: true,
             has_first_signature: true,
@@ -705,12 +694,12 @@ fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
     }
 
     // Check for zero signatures in signature1
-    let re_sig1 = Regex::new(r"signature1.*0{64}").unwrap();
+    let re_sig1 = Regex::new(r"signature1.*0{64}")?;
     if re_sig1.is_match(&stdout) {
         println!(
             "  {} {} has a header but no valid signatures",
             "✗".red(),
-            file_name
+            file_path
         );
         return Ok(SignatureStatus {
             has_header: true,
@@ -720,7 +709,7 @@ fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
     }
 
     // If we get here, the file has two signatures
-    println!("  {} {} has two signatures", "✓".green(), file_name);
+    println!("  {} {} has two signatures", "✓".green(), file_path);
     Ok(SignatureStatus {
         has_header: true,
         has_first_signature: true,
