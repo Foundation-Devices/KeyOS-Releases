@@ -11,6 +11,14 @@ create-tar VERSION:
     @echo "Creating tar file for version {{VERSION}}"
     cargo run --manifest-path tools/signer/Cargo.toml -- create-tar {{VERSION}}
 
+create-recovery-tar VERSION:
+    @echo "Creating recovery tar file for version {{VERSION}}"
+    cargo run --manifest-path tools/signer/Cargo.toml -- create-tar {{VERSION}} --recovery
+
+create-recovery-tar-dev VERSION:
+    @echo "Creating recovery tar file for version {{VERSION}} (one signature)"
+    cargo run --manifest-path tools/signer/Cargo.toml -- create-tar {{VERSION}} --recovery --allow-one-signature
+
 # Sign the tar file with the provided key
 sign-tar VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
     @echo "Signing tar file for version {{VERSION}} with config {{CONFIG_PATH}}"
