@@ -4,7 +4,7 @@ Command line tool for automatically generating KeyOS releases. See `--help` for 
 
 ## Dependencies
 
-- [updiff](https://github.com/sistemd/updiff)
+- [updiff](https://github.com/Foundation-Devices/updiff)
 
 ## Testing
 
