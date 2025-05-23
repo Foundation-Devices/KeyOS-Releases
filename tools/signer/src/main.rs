@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use log::debug;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -52,6 +51,13 @@ enum Commands {
     CreateTar {
         /// Version number (e.g., 1.0.2 or v1.0.2)
         version: String,
+
+        /// Supply this argument to produce a tar file for the Firmware Recovery mode.
+        #[arg(long)]
+        recovery: bool,
+
+        #[arg(long)]
+        allow_one_signature: bool,
     },
 
     /// Sign the tar file with the provided key
@@ -103,10 +109,19 @@ fn main() -> Result<()> {
             let firmware_version = strip_v_prefix(version);
             sign_files(&version_folder, config_path, &firmware_version)?;
         }
-        Commands::CreateTar { version } => {
+        Commands::CreateTar {
+            version,
+            recovery,
+            allow_one_signature,
+        } => {
             let version_folder = normalize_version(version)?;
             let firmware_version = strip_v_prefix(version);
-            create_tar(&version_folder, &firmware_version)?;
+            create_tar(
+                &version_folder,
+                &firmware_version,
+                *recovery,
+                *allow_one_signature,
+            )?;
         }
         Commands::SignTar {
             version,
@@ -136,7 +151,7 @@ fn normalize_version(version: &str) -> Result<String> {
 }
 
 fn strip_v_prefix(version: &str) -> String {
-    // Remove 'v' prefix if present for cosign2 --firmware-version parameter
+    // Remove 'v' prefix if present for cosign2 --binary-version parameter
     if version.starts_with('v') {
         version[1..].to_string()
     } else {
@@ -156,57 +171,15 @@ fn sign_files(version_folder: &str, config_path: &str, firmware_version: &str) -
     }
 
     // Check for required files
-    let recovery_bin = format!("{}/recovery.bin", version_folder);
     let app_bin = format!("{}/app.bin", version_folder);
-
-    if !Path::new(&recovery_bin).exists() {
-        return Err(SignerError::FileNotFound(recovery_bin).into());
-    }
 
     if !Path::new(&app_bin).exists() {
         return Err(SignerError::FileNotFound(app_bin).into());
     }
 
-    // Sign recovery.bin
-    print!(
-        "Signing recovery image ({})...",
-        Path::new(&recovery_bin)
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-    );
-
-    debug!("  File: {}", recovery_bin);
-    debug!("  Config path: {}", config_path);
-    debug!("  Firmware version: {}", firmware_version);
-
-    let output = Command::new("cosign2")
-        .args([
-            "sign",
-            "-i",
-            &recovery_bin,
-            "-c",
-            config_path,
-            "--in-place",
-            "--firmware-version",
-            firmware_version,
-        ])
-        .output()
-        .context(format!("{} cosign2 error", "✗".red()))?;
-
-    if !output.status.success() {
-        println!("{} Failed to sign", "✗".red());
-        return Err(SignerError::CommandFailed(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        )
-        .into());
-    }
-
-    println!("{}", "✓ Success".green());
-
     // Sign app.bin
     print!(
-        "Signing main firmware image ({})...",
+        "Signing KeyOS image ({})...",
         Path::new(&app_bin).file_name().unwrap().to_string_lossy()
     );
 
@@ -218,7 +191,7 @@ fn sign_files(version_folder: &str, config_path: &str, firmware_version: &str) -
             "-c",
             config_path,
             "--in-place",
-            "--firmware-version",
+            "--binary-version",
             firmware_version,
         ])
         .output()
@@ -246,34 +219,30 @@ fn sign_files(version_folder: &str, config_path: &str, firmware_version: &str) -
     let apps_dir = format!("{}/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
 
-    let mut app_count = 0;
-
     if apps_path.is_dir() {
-        let mut app_files = Vec::new();
-
-        // Collect all app files first
+        let mut apps = Vec::new();
         for entry in fs::read_dir(apps_path).context("Failed to read apps directory")? {
             let entry = entry.context("Failed to read directory entry")?;
             let path = entry.path();
 
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "elf") {
-                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                    if file_name.starts_with("gui-app") {
-                        app_files.push((file_name.to_string(), path));
-                        app_count += 1;
-                    }
+            // Found an app dir, it should contain an app .elf and a manifest
+            if path.is_dir() {
+                let elf_path = path.clone().join("app.elf");
+                let manifest_path = path.clone().join("manifest.json");
+                if elf_path.exists() && manifest_path.exists() {
+                    apps.push((elf_path, manifest_path));
                 }
             }
         }
 
-        if app_count > 0 {
-            println!("Found {} dynamically loadable apps", app_count);
+        if !apps.is_empty() {
+            println!("Found {} dynamically loadable apps", apps.len());
 
             // Sign each app
-            for (file_name, path) in app_files {
-                print!("Signing app: {}...", file_name);
+            for (elf_path, _manifest_path) in apps {
+                print!("Signing app: {}...", elf_path.display());
 
-                let app_path = path.to_str().unwrap();
+                let app_path = elf_path.to_str().unwrap();
 
                 let output = Command::new("cosign2")
                     .args([
@@ -283,7 +252,7 @@ fn sign_files(version_folder: &str, config_path: &str, firmware_version: &str) -
                         "-c",
                         config_path,
                         "--in-place",
-                        "--firmware-version",
+                        "--binary-version",
                         firmware_version,
                     ])
                     .output()
@@ -319,10 +288,20 @@ fn sign_files(version_folder: &str, config_path: &str, firmware_version: &str) -
     Ok(())
 }
 
-fn create_tar(version_folder: &str, firmware_version: &str) -> Result<()> {
+fn create_tar(
+    version_folder: &str,
+    firmware_version: &str,
+    is_recovery: bool,
+    allow_one_signature: bool,
+) -> Result<()> {
     println!(
         "{}",
-        format!("Creating tar file for version {}", firmware_version).bold()
+        format!(
+            "Creating {}tar file for version {}",
+            if is_recovery { "recovery " } else { "" },
+            firmware_version
+        )
+        .bold()
     );
 
     // Check if version folder exists
@@ -332,21 +311,13 @@ fn create_tar(version_folder: &str, firmware_version: &str) -> Result<()> {
 
     println!("Checking signatures on all files...");
 
-    // Check recovery.bin and app.bin
-    let recovery_bin = format!("{}/recovery.bin", version_folder);
     let app_bin = format!("{}/app.bin", version_folder);
 
     let mut all_signed = true;
     let mut unsigned_files = Vec::new();
 
-    let recovery_status = check_signatures(&recovery_bin)?;
-    if !recovery_status.has_second_signature {
-        all_signed = false;
-        unsigned_files.push("recovery.bin".to_string());
-    }
-
     let app_status = check_signatures(&app_bin)?;
-    if !app_status.has_second_signature {
+    if !app_status.has_second_signature && !allow_one_signature {
         all_signed = false;
         unsigned_files.push("app.bin".to_string());
     }
@@ -360,24 +331,20 @@ fn create_tar(version_folder: &str, firmware_version: &str) -> Result<()> {
             let entry = entry.context("Failed to read directory entry")?;
             let path = entry.path();
 
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "elf") {
-                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                    if file_name.starts_with("gui-app") {
-                        let app_path = path.to_str().unwrap();
-                        let app_status = check_signatures(app_path)?;
-                        if !app_status.has_second_signature {
-                            all_signed = false;
-                            // Convert to owned String
-                            unsigned_files.push(file_name.to_string());
-                        }
-                    }
+            // Found an app dir, it should contain an app .elf and a manifest
+            if path.is_dir() {
+                let elf_path = format!("{}/app.elf", path.display());
+                let app_status = check_signatures(&elf_path)?;
+                if allow_one_signature && !app_status.has_second_signature {
+                    all_signed = false;
+                    unsigned_files.push(elf_path);
                 }
             }
         }
     }
 
     // Only proceed with tar file creation if all files are properly signed
-    if !all_signed {
+    if !all_signed && !allow_one_signature {
         println!("{} Some files don't have two signatures", "✗".red());
         println!(
             "{}",
@@ -389,7 +356,7 @@ fn create_tar(version_folder: &str, firmware_version: &str) -> Result<()> {
         return Err(SignerError::InsufficientSignatures.into());
     }
 
-    println!("{} All files have two signatures", "✓".green());
+    println!("{} All files have sufficient signatures", "✓".green());
 
     // Generate manifest file
     println!("Generating manifest file...");
@@ -409,10 +376,8 @@ fn create_tar(version_folder: &str, firmware_version: &str) -> Result<()> {
     // Collect all files to include in the tar
     let mut files_to_include = Vec::new();
 
-    // Add recovery.bin and app.bin
-    let recovery_bin = format!("{}/recovery.bin", version_folder);
+    // Add app.bin
     let app_bin = format!("{}/app.bin", version_folder);
-    files_to_include.push(recovery_bin);
     files_to_include.push(app_bin);
 
     // Add manifest.json
@@ -427,11 +392,13 @@ fn create_tar(version_folder: &str, firmware_version: &str) -> Result<()> {
             let entry = entry.context("Failed to read directory entry")?;
             let path = entry.path();
 
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "elf") {
-                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                    if file_name.starts_with("gui-app") {
-                        files_to_include.push(path.to_string_lossy().to_string());
-                    }
+            // Found an app dir, it should contain an app .elf and a manifest
+            if path.is_dir() {
+                let elf_path = path.clone().join("app.elf");
+                let manifest_path = path.clone().join("manifest.json");
+                if elf_path.exists() && manifest_path.exists() {
+                    files_to_include.push(elf_path.to_string_lossy().to_string());
+                    files_to_include.push(manifest_path.to_string_lossy().to_string());
                 }
             }
         }
@@ -542,7 +509,7 @@ fn sign_tar(version_folder: &str, config_path: &str, firmware_version: &str) -> 
             "-c",
             config_path,
             "--in-place",
-            "--firmware-version",
+            "--binary-version",
             firmware_version,
         ])
         .output()
@@ -585,20 +552,6 @@ fn validate(version_folder: &str, firmware_version: &str) -> Result<()> {
     let mut all_valid = true;
     let mut missing_files = Vec::new();
     let mut unsigned_files = Vec::new();
-
-    // Check recovery.bin
-    let recovery_bin = format!("{}/recovery.bin", version_folder);
-    if !Path::new(&recovery_bin).exists() {
-        println!("  {} recovery.bin is missing", "✗".red());
-        missing_files.push("recovery.bin".to_string());
-        all_valid = false;
-    } else {
-        let recovery_status = check_signatures(&recovery_bin)?;
-        if !recovery_status.has_second_signature {
-            unsigned_files.push("recovery.bin".to_string());
-            all_valid = false;
-        }
-    }
 
     // Check app.bin
     let app_bin = format!("{}/app.bin", version_folder);
@@ -707,11 +660,6 @@ fn validate(version_folder: &str, firmware_version: &str) -> Result<()> {
 }
 
 fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
-    let file_name = Path::new(file_path)
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy();
-
     // Run cosign2 dump and capture output
     let output = Command::new("cosign2")
         .args(["dump", "--input", file_path])
@@ -726,7 +674,7 @@ fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
         || stderr.contains("no header found")
         || stdout.contains("no header found")
     {
-        println!("  {} {} has no signatures", "✗".red(), file_name);
+        println!("  {} {} has no signatures", "✗".red(), file_path);
         return Ok(SignatureStatus {
             has_header: false,
             has_first_signature: false,
@@ -735,9 +683,9 @@ fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
     }
 
     // Check for zero signatures in signature2
-    let re_sig2 = Regex::new(r"signature2.*0{64}").unwrap();
+    let re_sig2 = Regex::new(r"signature2.*0{64}")?;
     if re_sig2.is_match(&stdout) {
-        println!("  {} {} has only one signature", "⚠".yellow(), file_name);
+        println!("  {} {} has only one signature", "⚠".yellow(), file_path);
         return Ok(SignatureStatus {
             has_header: true,
             has_first_signature: true,
@@ -746,12 +694,12 @@ fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
     }
 
     // Check for zero signatures in signature1
-    let re_sig1 = Regex::new(r"signature1.*0{64}").unwrap();
+    let re_sig1 = Regex::new(r"signature1.*0{64}")?;
     if re_sig1.is_match(&stdout) {
         println!(
             "  {} {} has a header but no valid signatures",
             "✗".red(),
-            file_name
+            file_path
         );
         return Ok(SignatureStatus {
             has_header: true,
@@ -761,7 +709,7 @@ fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
     }
 
     // If we get here, the file has two signatures
-    println!("  {} {} has two signatures", "✓".green(), file_name);
+    println!("  {} {} has two signatures", "✓".green(), file_path);
     Ok(SignatureStatus {
         has_header: true,
         has_first_signature: true,
@@ -778,14 +726,6 @@ fn generate_manifest(version_folder: &str, firmware_version: &str) -> Result<()>
         version: format!("v{}", firmware_version),
         files: Vec::new(),
     };
-
-    // Add recovery.bin to manifest
-    let recovery_bin = format!("{}/recovery.bin", version_folder);
-    let recovery_hash = calculate_hash(&recovery_bin)?;
-    manifest.files.push(FileEntry {
-        name: "recovery.bin".to_string(),
-        hash: format!("0x{}", recovery_hash),
-    });
 
     // Add app.bin to manifest
     let app_bin = format!("{}/app.bin", version_folder);
