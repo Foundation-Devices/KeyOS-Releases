@@ -41,3 +41,7 @@ unsign VERSION:
 validate VERSION:
     @echo "Validating signatures for version {{VERSION}}..."
     cargo run --manifest-path tools/signer/Cargo.toml -- validate {{VERSION}}
+
+# Generate a new release.tar between two versions
+release-gen *args:
+    cargo run --manifest-path tools/release-gen/Cargo.toml -- {{args}}
