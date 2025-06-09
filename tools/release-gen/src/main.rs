@@ -1,7 +1,7 @@
 use {
     anyhow::Context,
     clap::Parser,
-    release_manifest::{Action, ReleaseManifest, SignedData},
+    release_manifest::{Action, ReleaseManifest},
     std::{
         fs::{File, ReadDir},
         io::{Read, Write},
@@ -191,13 +191,10 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
     let actions = vec![Action::Transaction { actions }];
 
     let manifest = ReleaseManifest {
-        signature: String::from("deadbeef"),
-        signed_data: SignedData {
-            label: args.label.clone(),
-            mandatory: args.mandatory,
-            date: chrono::Utc::now().date_naive().to_string(),
-            actions,
-        },
+        label: args.label.clone(),
+        mandatory: args.mandatory,
+        date: chrono::Utc::now().date_naive().to_string(),
+        actions,
     };
 
     manifest_file
