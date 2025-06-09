@@ -6,13 +6,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ReleaseManifest {
-    pub signature: String,
-    pub signed_data: SignedData,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct SignedData {
     pub label: String,
     pub mandatory: bool,
     pub date: String,
