@@ -44,17 +44,16 @@ fn release_roundtrip() {
     let reader = BufReader::new(manifest_file);
     let manifest: ReleaseManifest = serde_json::from_reader(reader).unwrap();
 
-    assert_eq!(manifest.signature, "deadbeef");
-    assert_eq!(manifest.signed_data.label, "test label");
-    assert!(manifest.signed_data.mandatory);
+    assert_eq!(manifest.label, "test label");
+    assert!(manifest.mandatory);
     assert_eq!(
-        manifest.signed_data.date,
+        manifest.date,
         chrono::Utc::now().date_naive().to_string(),
     );
 
-    assert_eq!(manifest.signed_data.actions.len(), 1);
+    assert_eq!(manifest.actions.len(), 1);
 
-    let Action::Transaction { ref actions } = manifest.signed_data.actions[0] else {
+    let Action::Transaction { ref actions } = manifest.actions[0] else {
         panic!("Expected a single transaction action");
     };
 
