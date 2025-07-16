@@ -105,7 +105,7 @@ fn main() -> Result<()> {
             version,
             config_path,
         } => {
-            let version_folder = normalize_version(version)?;
+            let version_folder = version.clone();
             let firmware_version = strip_v_prefix(version);
             sign_files(&version_folder, config_path, &firmware_version)?;
         }
@@ -114,7 +114,7 @@ fn main() -> Result<()> {
             recovery,
             allow_one_signature,
         } => {
-            let version_folder = normalize_version(version)?;
+            let version_folder = version.clone();
             let firmware_version = strip_v_prefix(version);
             create_tar(
                 &version_folder,
@@ -127,27 +127,18 @@ fn main() -> Result<()> {
             version,
             config_path,
         } => {
-            let version_folder = normalize_version(version)?;
+            let version_folder = version.clone();
             let firmware_version = strip_v_prefix(version);
             sign_tar(&version_folder, config_path, &firmware_version)?;
         }
         Commands::Validate { version } => {
-            let version_folder = normalize_version(version)?;
+            let version_folder = version.clone();
             let firmware_version = strip_v_prefix(version);
             validate(&version_folder, &firmware_version)?;
         }
     }
 
     Ok(())
-}
-
-fn normalize_version(version: &str) -> Result<String> {
-    // Ensure version has a 'v' prefix
-    if version.starts_with('v') {
-        Ok(version.to_string())
-    } else {
-        Ok(format!("v{}", version))
-    }
 }
 
 fn strip_v_prefix(version: &str) -> String {
