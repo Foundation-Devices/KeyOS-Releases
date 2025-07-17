@@ -45,3 +45,13 @@ validate VERSION:
 # Generate a new release.tar between two versions
 release-gen *args:
     cargo run --manifest-path tools/release-gen/Cargo.toml -- {{args}}
+
+# Create a bootable disk image from firmware components
+create-image VERSION OUTPUT="boot.img":
+    @echo "Creating disk image for version {{VERSION}}"
+    cargo run --manifest-path tools/image-builder/Cargo.toml -- create-image {{VERSION}} --output {{OUTPUT}}
+
+# Print SHA256 hashes of firmware components
+print-hashes VERSION:
+    @echo "Printing hashes for version {{VERSION}}"
+    cargo run --manifest-path tools/image-builder/Cargo.toml -- print-hashes {{VERSION}}
