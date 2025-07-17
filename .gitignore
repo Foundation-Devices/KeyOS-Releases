@@ -1,4 +1,5 @@
 .DS_Store
 tools/signer/target/
+tools/image-builder/target/
 cosign2.toml
 .idea
