@@ -1,0 +1,25 @@
+{
+  "appName": {
+    "en": "Dev Playground"
+  },
+  "appDescription": {
+    "en": "Developer testing playground for loaders, haptics, and LEDs"
+  },
+  "appId": "0x7c9f81f9bcee31425062fb0d8fbf3001",
+  "appSignature": "0x00",
+  "servers": [],
+  "permissions": [
+    {
+      "server": "os/gui-server",
+      "messages": "0..128"
+    },
+    {
+      "server": "os/haptics",
+      "messages": "0..128"
+    },
+    {
+      "server": "os/led-control",
+      "messages": "0..128"
+    }
+  ]
+}
