@@ -1,0 +1,19 @@
+{
+  "appName": {
+    "en": "QR Scanner"
+  },
+  "appDescription": {},
+  "appId": "0x6775692d6170702d6578616d706c652e",
+  "appSignature": "0x00",
+  "servers": [],
+  "permissions": [
+    {
+      "server": "os/gui-server",
+      "messages": "0..128"
+    },
+    {
+      "server": "os/camera-server",
+      "messages": "0..128"
+    }
+  ]
+}
