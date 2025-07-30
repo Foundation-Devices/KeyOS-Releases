@@ -1,0 +1,19 @@
+{
+  "appName": {
+    "en": "System Actions"
+  },
+  "appDescription": {},
+  "appId": "0x6775692d6170702d73797374656d2d61",
+  "appSignature": "0x00",
+  "servers": [],
+  "permissions": [
+    {
+      "server": "os/gui-server",
+      "messages": "0..128"
+    },
+    {
+      "server": "os/settings",
+      "messages": "0..128"
+    }
+  ]
+}

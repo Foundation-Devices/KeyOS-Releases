@@ -1,0 +1,15 @@
+{
+  "appName": {
+    "en": "Image Viewer"
+  },
+  "appDescription": {},
+  "appId": "0x0944ad38232eab9a060661c2e8dc7eb5",
+  "appSignature": "0x00",
+  "servers": [],
+  "permissions": [
+    {
+      "server": "os/gui-server",
+      "messages": "0..128"
+    }
+  ]
+}
