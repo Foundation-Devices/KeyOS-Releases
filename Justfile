@@ -28,13 +28,13 @@ sign-tar VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.t
 unsign VERSION:
     @echo "Unsigning all files for version {{VERSION}} (git reset)"
     @echo "Resetting KeyOS image..."
-    git checkout -- v{{VERSION}}/app.bin
+    git checkout -- {{VERSION}}/app.bin
     @echo "Resetting app files..."
-    git checkout -- v{{VERSION}}/apps/*.elf
+    git checkout -- {{VERSION}}/apps/*.elf
     @echo "Removing tar file if it exists..."
-    rm -f v{{VERSION}}/KeyOS-v{{VERSION}}.tar
+    rm -f {{VERSION}}/KeyOS-v{{VERSION}}.tar
     @echo "Removing manifest file if it exists..."
-    rm -f v{{VERSION}}/manifest.json
+    rm -f {{VERSION}}/manifest.json
     @echo "✓ All files have been reset to their unsigned state"
 
 # Validate that all files for a version are properly signed
@@ -45,3 +45,13 @@ validate VERSION:
 # Generate a new release.tar between two versions
 release-gen *args:
     cargo run --manifest-path tools/release-gen/Cargo.toml -- {{args}}
+
+# Create a bootable disk image from firmware components
+create-image VERSION OUTPUT="boot.img":
+    @echo "Creating disk image for version {{VERSION}}"
+    cargo run --manifest-path tools/image-builder/Cargo.toml -- create-image {{VERSION}} --output {{OUTPUT}}
+
+# Print SHA256 hashes of firmware components
+print-hashes VERSION:
+    @echo "Printing hashes for version {{VERSION}}"
+    cargo run --manifest-path tools/image-builder/Cargo.toml -- print-hashes {{VERSION}}
