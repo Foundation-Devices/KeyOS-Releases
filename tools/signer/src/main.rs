@@ -398,7 +398,7 @@ fn create_tar(
             }
         }
     }
-    
+
     // Add all assets in the common directory
     let mut num_assets = 0;
     let common_dir = format!("{}/common", version_folder);
@@ -428,7 +428,7 @@ fn create_tar(
         "Creating tar file: {}...",
         Path::new(&tar_file).file_name().unwrap().to_string_lossy()
     );
-    
+
     // Build the tar command with an explicit file list
     let mut tar_cmd = Command::new("tar");
     tar_cmd.arg("-cf").arg(&tar_file);
