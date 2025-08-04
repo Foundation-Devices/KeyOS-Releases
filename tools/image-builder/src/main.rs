@@ -28,6 +28,10 @@ enum ImageBuilderError {
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+
+    /// Whether this is a production build (default: false)
+    #[arg(short, long, default_value = "false")]
+    production: bool,
 }
 
 #[derive(Subcommand)]
@@ -82,11 +86,11 @@ fn main() -> Result<()> {
     match &cli.command {
         Commands::CreateImage { version, output } => {
             let version_folder = version.clone();
-            create_boot_image(&version_folder, output)?;
+            create_boot_image(&version_folder, cli.production, output)?;
         }
         Commands::PrintHashes { version } => {
             let version_folder = version.clone();
-            print_hashes(&version_folder)?;
+            print_hashes(&version_folder, cli.production)?;
         }
     }
 
@@ -101,31 +105,53 @@ fn strip_v_prefix(version: &str) -> String {
     }
 }
 
-fn check_images_exist(version_folder: &str) -> Result<()> {
-    let boot_bin = format!("{}/boot.bin", version_folder);
-    let app_bin = format!("{}/app.bin", version_folder);
-    let recovery_bin = format!("{}/recovery.bin", version_folder);
+fn check_images_exist(version_folder: &str, is_production: bool) -> Result<()> {
+    let bootloader_ext = if is_production { "cip" } else { "bin" };
+    let boot_bin = format!("{version_folder}/boot.{bootloader_ext}");
+    let blassets = format!("{version_folder}/blassets");
+    let common = format!("{version_folder}/common");
+    let common_boot = format!("{version_folder}/common-boot");
+
+    let app_bin = format!("{version_folder}/app.bin");
+    let recovery_bin = format!("{version_folder}/recovery.bin");
 
     if !Path::new(&boot_bin).exists() {
         return Err(ImageBuilderError::FileNotFound(format!(
-            "boot.bin not found in {}. This file is required for the bootloader.",
-            version_folder
+            "boot.{bootloader_ext} not found in {version_folder}. This file is required to boot KeyOS.",
+        ))
+        .into());
+    }
+    if !Path::new(&blassets).exists() {
+        return Err(ImageBuilderError::FileNotFound(format!(
+            "blassets not found in {version_folder}. This folder is required to boot KeyOS.",
+        ))
+        .into());
+    }
+
+    if !Path::new(&common).exists() {
+        return Err(ImageBuilderError::FileNotFound(format!(
+            "`common` not found in {version_folder}. This folder is required to boot KeyOS.",
+        ))
+        .into());
+    }
+
+    if !Path::new(&common_boot).exists() {
+        return Err(ImageBuilderError::FileNotFound(format!(
+            "`common-boot` not found in {version_folder}. This folder is required to boot KeyOS.",
         ))
         .into());
     }
 
     if !Path::new(&app_bin).exists() {
         return Err(ImageBuilderError::FileNotFound(format!(
-            "app.bin not found in {}. This file should be signed first.",
-            version_folder
+            "app.bin not found in {version_folder}. This file should be signed first.",
         ))
         .into());
     }
 
     if !Path::new(&recovery_bin).exists() {
         return Err(ImageBuilderError::FileNotFound(format!(
-            "recovery.bin not found in {}. This file is required for recovery mode.",
-            version_folder
+            "recovery.bin not found in {version_folder}. This file is required for recovery mode.",
         ))
         .into());
     }
@@ -208,7 +234,7 @@ fn format_partition<'a>(
     FileSystem::new(boot_partition, fatfs::FsOptions::new()).context("open filesystem")
 }
 
-fn create_boot_partition(file: &mut File, version_folder: &str) -> Result<()> {
+fn create_boot_partition(file: &mut File, version_folder: &str, is_production: bool) -> Result<()> {
     println!("{}", "Creating boot partition...".bold());
 
     let fs = format_partition(
@@ -221,9 +247,13 @@ fn create_boot_partition(file: &mut File, version_folder: &str) -> Result<()> {
     )
     .context("formatting boot partition")?;
 
-    // Copy boot.bin (bootloader)
-    let boot_bin_path = format!("{}/boot.bin", version_folder);
-    println!("  {} Copying boot.bin to boot partition", "→".blue());
+    // Copy bootloader
+    let bootloader_ext = if is_production { "cip" } else { "bin" };
+    let boot_bin_path = format!("{}/boot.{bootloader_ext}", version_folder);
+    println!(
+        "  {} Copying boot.{bootloader_ext} to boot partition",
+        "→".blue()
+    );
     fs.root_dir()
         .create_file("boot.bin")?
         .write_all(&fs::read(&boot_bin_path)?)?;
@@ -235,7 +265,64 @@ fn create_boot_partition(file: &mut File, version_folder: &str) -> Result<()> {
         .create_file("recovery.bin")?
         .write_all(&fs::read(&recovery_bin_path)?)?;
 
+    copy_directory_to_disk(
+        &mut fs.root_dir(),
+        version_folder,
+        "bootloader assets",
+        "blassets",
+        "blassets",
+    )?;
+    copy_directory_to_disk(
+        &mut fs.root_dir(),
+        version_folder,
+        "recovery OS common assets",
+        "common-boot",
+        "common",
+    )?;
+
     println!("{} Boot partition created successfully", "✓".green());
+    Ok(())
+}
+
+fn copy_directory_to_disk(
+    root_dir: &mut Dir<StreamSlice<&mut File>>,
+    version_folder: &str,
+    kind: &str,
+    src_dir: &str,
+    dst_dir: &str,
+) -> Result<()> {
+    let fs_dst_dir = root_dir.create_dir(dst_dir)?;
+    let fs_src_dir = Path::new(&version_folder).join(src_dir).read_dir()?;
+
+    for asset_file in fs_src_dir {
+        let file = asset_file?;
+        let file_name = file.file_name();
+        let file_name = file_name.to_str().unwrap();
+
+        if file.file_type()?.is_dir() {
+            copy_directory_to_disk(
+                root_dir,
+                version_folder,
+                &kind,
+                format!("{}/{}", src_dir, file_name).as_str(),
+                format!("{}/{}", dst_dir, file_name).as_str(),
+            )?;
+            continue;
+        }
+
+        println!(
+            "  {} Copying {kind} {} -> {}/{}",
+            "→".blue(),
+            file.path().as_os_str().to_str().unwrap(),
+            dst_dir,
+            file_name
+        );
+
+        fs_dst_dir
+            .create_file(file_name)?
+            .write_all(&fs::read(file.path())?)?;
+    }
+
     Ok(())
 }
 
@@ -287,6 +374,14 @@ fn create_system_partition(file: &mut File, version_folder: &str) -> Result<()> 
         println!("  {} No apps directory found", "⚠".yellow());
     }
 
+    copy_directory_to_disk(
+        &mut fs.root_dir(),
+        version_folder,
+        "common assets",
+        "common",
+        "common",
+    )?;
+
     println!("{} System partition created successfully", "✓".green());
     Ok(())
 }
@@ -307,18 +402,23 @@ fn create_user_partition(file: &mut File) -> Result<()> {
     Ok(())
 }
 
-fn create_boot_image(version_folder: &str, output_file: &str) -> Result<()> {
+fn create_boot_image(version_folder: &str, is_production: bool, output_file: &str) -> Result<()> {
     println!(
         "{}",
         format!(
-            "Creating disk image for version {}",
+            "Creating {} disk image for version {}",
+            if is_production {
+                "production".underline()
+            } else {
+                "development".underline()
+            },
             strip_v_prefix(version_folder)
         )
         .bold()
     );
 
     // Check that all required files exist
-    check_images_exist(version_folder)?;
+    check_images_exist(version_folder, is_production)?;
 
     println!("Creating {}", output_file);
     let mut boot_image = fs::OpenOptions::new()
@@ -330,7 +430,7 @@ fn create_boot_image(version_folder: &str, output_file: &str) -> Result<()> {
         .context("Failed to create output image file")?;
 
     init_mbr(&mut boot_image).context("Failed to initialize MBR")?;
-    create_boot_partition(&mut boot_image, version_folder)
+    create_boot_partition(&mut boot_image, version_folder, is_production)
         .context("Failed to create boot partition")?;
     create_system_partition(&mut boot_image, version_folder)
         .context("Failed to create system partition")?;
@@ -360,7 +460,7 @@ fn print_digest_of_cosigned_file(name: &str, path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn print_hashes(version_folder: &str) -> Result<()> {
+fn print_hashes(version_folder: &str, is_production: bool) -> Result<()> {
     println!(
         "{}",
         format!(
@@ -372,7 +472,7 @@ fn print_hashes(version_folder: &str) -> Result<()> {
     println!("The SHA256 hashes of all binaries (without the cosign2 header where applicable)");
 
     // Check that files exist first
-    check_images_exist(version_folder)?;
+    check_images_exist(version_folder, is_production)?;
 
     // Print bootloader hash (no cosign2 header expected)
     let boot_bin_path = format!("{}/boot.bin", version_folder);
