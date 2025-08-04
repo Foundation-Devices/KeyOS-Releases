@@ -21,7 +21,7 @@ fn release_roundtrip() {
     let new_ver = String::from("v0.0.2");
     let new_dir = PathBuf::from("src/test/fixtures/new/");
     let out_dir = PathBuf::from("src/test/fixtures/out");
-    let tar_path = out_dir.join("release.tar");
+    let out_path = out_dir.join("release.tar");
 
     let args = Args {
         base_version: base_ver.clone(),
@@ -30,14 +30,14 @@ fn release_roundtrip() {
         new: new_dir.clone(),
         label: String::from("test label"),
         mandatory: true,
-        out: tar_path.clone(),
+        out: out_path.clone(),
         updiff_path,
     };
 
     run(args).unwrap();
 
-    let tar_file = File::open(tar_path).unwrap();
-    let mut tar = tar::Archive::new(tar_file);
+    let out_file = File::open(out_path).unwrap();
+    let mut tar = tar::Archive::new(out_file);
     tar.unpack(&out_dir).unwrap();
 
     let manifest_file = File::open(out_dir.join("manifest.json")).unwrap();
