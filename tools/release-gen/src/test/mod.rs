@@ -46,10 +46,7 @@ fn release_roundtrip() {
 
     assert_eq!(manifest.label, "test label");
     assert!(manifest.mandatory);
-    assert_eq!(
-        manifest.date,
-        chrono::Utc::now().date_naive().to_string(),
-    );
+    assert_eq!(manifest.date, chrono::Utc::now().date_naive().to_string());
 
     assert_eq!(manifest.actions.len(), 1);
 
@@ -81,8 +78,9 @@ fn release_roundtrip() {
                     let mut patch_file = File::open(&patch_file_full).unwrap();
                     // Skip the `updiff` header.
                     patch_file.seek(io::SeekFrom::Start(216)).unwrap();
+                    let mut decoder = bzip2::read::BzDecoder::new(patch_file);
                     let mut buf = vec![];
-                    File::read_to_end(&mut patch_file, &mut buf).unwrap();
+                    decoder.read_to_end(&mut buf).unwrap();
                     buf
                 };
                 let mut patched_file_buf = Vec::with_capacity(base_file_buf.len());
