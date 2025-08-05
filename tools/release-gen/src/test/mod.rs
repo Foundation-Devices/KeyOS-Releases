@@ -21,7 +21,7 @@ fn release_roundtrip() {
     let new_ver = String::from("v0.0.2");
     let new_dir = PathBuf::from("src/test/fixtures/new/");
     let out_dir = PathBuf::from("src/test/fixtures/out");
-    let tar_path = out_dir.join("release.tar");
+    let out_path = out_dir.join("release.tar");
 
     let args = Args {
         base_version: base_ver.clone(),
@@ -30,14 +30,14 @@ fn release_roundtrip() {
         new: new_dir.clone(),
         label: String::from("test label"),
         mandatory: true,
-        out: tar_path.clone(),
+        out: out_path.clone(),
         updiff_path,
     };
 
     run(args).unwrap();
 
-    let tar_file = File::open(tar_path).unwrap();
-    let mut tar = tar::Archive::new(tar_file);
+    let out_file = File::open(out_path).unwrap();
+    let mut tar = tar::Archive::new(out_file);
     tar.unpack(&out_dir).unwrap();
 
     let manifest_file = File::open(out_dir.join("manifest.json")).unwrap();
@@ -46,10 +46,7 @@ fn release_roundtrip() {
 
     assert_eq!(manifest.label, "test label");
     assert!(manifest.mandatory);
-    assert_eq!(
-        manifest.date,
-        chrono::Utc::now().date_naive().to_string(),
-    );
+    assert_eq!(manifest.date, chrono::Utc::now().date_naive().to_string());
 
     assert_eq!(manifest.actions.len(), 1);
 
@@ -81,8 +78,9 @@ fn release_roundtrip() {
                     let mut patch_file = File::open(&patch_file_full).unwrap();
                     // Skip the `updiff` header.
                     patch_file.seek(io::SeekFrom::Start(216)).unwrap();
+                    let mut decoder = bzip2::read::BzDecoder::new(patch_file);
                     let mut buf = vec![];
-                    File::read_to_end(&mut patch_file, &mut buf).unwrap();
+                    decoder.read_to_end(&mut buf).unwrap();
                     buf
                 };
                 let mut patched_file_buf = Vec::with_capacity(base_file_buf.len());
