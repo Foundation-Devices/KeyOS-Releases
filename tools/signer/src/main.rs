@@ -354,6 +354,16 @@ fn create_tar(
         unsigned_files.push("app.bin".to_string());
     }
 
+    let recovery_bin = format!("{}/recovery.bin", version_folder);
+    let has_recovery_bin = Path::new(&recovery_bin).exists();
+    if is_recovery && has_recovery_bin {
+        let recovery_status = check_signatures(&app_bin)?;
+        if !recovery_status.has_second_signature && !allow_one_signature {
+            all_signed = false;
+            unsigned_files.push("recovery.bin".to_string());
+        }
+    }
+
     // Check all app files
     let apps_dir = format!("{}/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
@@ -390,6 +400,37 @@ fn create_tar(
 
     println!("{} All files have sufficient signatures", "✓".green());
 
+    // Collect all files to include in the tar
+    let mut files_to_include = Vec::new();
+
+    // Add recovery.bin (optional)
+    if is_recovery && has_recovery_bin {
+        files_to_include.push(recovery_bin);
+        println!(
+            "  {} recovery OS (recovery.bin) will be included",
+            "⚠".yellow()
+        );
+    }
+
+    // Add bootloader (boot.bin or boot.cip; latter takes precedence)
+    let boot_cip = format!("{}/boot.cip", version_folder);
+    let has_boot_cip = Path::new(&boot_cip).exists();
+    let boot_bin = format!("{}/boot.bin", version_folder);
+    let has_boot_bin = Path::new(&boot_bin).exists();
+    if has_boot_cip {
+        files_to_include.push(boot_cip);
+        println!("  {} bootloader (boot.cip) will be included", "⚠".yellow());
+        if has_boot_bin {
+            println!(
+                "  {} boot.bin exists but ignored because boot.cip takes precedence",
+                "⚠".yellow()
+            );
+        }
+    } else if has_boot_bin {
+        println!("  {} bootloader (boot.bin) will be included", "⚠".yellow());
+        files_to_include.push(boot_bin);
+    }
+
     // Generate manifest file
     println!("Generating manifest file...");
 
@@ -397,14 +438,10 @@ fn create_tar(
 
     println!("{} Manifest file generated successfully", "✓".green());
 
-    // Create tar file
+    // Create the tar file
     let tar_file = format!("{}/KeyOS-v{}.bin", version_folder, firmware_version);
 
-    // Collect all files to include in the tar
-    let mut files_to_include = Vec::new();
-
     // Add app.bin
-    let app_bin = format!("{}/app.bin", version_folder);
     files_to_include.push(app_bin);
 
     // Add manifest.json
@@ -492,7 +529,7 @@ fn create_tar(
         "\n{} {}",
         "✓".green().bold(),
         format!(
-            "Tar file creation complete for version {}",
+            "Tar file creation completed for version {}",
             firmware_version
         )
         .green()
