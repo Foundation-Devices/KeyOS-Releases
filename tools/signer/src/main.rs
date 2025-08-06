@@ -45,6 +45,9 @@ enum Commands {
         /// Path to cosign2 configuration file
         #[arg(default_value = "~/cosign2.toml")]
         config_path: String,
+
+        #[arg(long)]
+        developer: bool,
     },
 
     /// Create tar file (only when all files have two signatures)
@@ -104,17 +107,18 @@ fn main() -> Result<()> {
         Commands::SignFiles {
             version,
             config_path,
+            developer,
         } => {
-            let version_folder = normalize_version(version)?;
+            let version_folder = version.clone();
             let firmware_version = strip_v_prefix(version);
-            sign_files(&version_folder, config_path, &firmware_version)?;
+            sign_files(&version_folder, config_path, &firmware_version, *developer)?;
         }
         Commands::CreateTar {
             version,
             recovery,
             allow_one_signature,
         } => {
-            let version_folder = normalize_version(version)?;
+            let version_folder = version.clone();
             let firmware_version = strip_v_prefix(version);
             create_tar(
                 &version_folder,
@@ -127,27 +131,18 @@ fn main() -> Result<()> {
             version,
             config_path,
         } => {
-            let version_folder = normalize_version(version)?;
+            let version_folder = version.clone();
             let firmware_version = strip_v_prefix(version);
             sign_tar(&version_folder, config_path, &firmware_version)?;
         }
         Commands::Validate { version } => {
-            let version_folder = normalize_version(version)?;
+            let version_folder = version.clone();
             let firmware_version = strip_v_prefix(version);
             validate(&version_folder, &firmware_version)?;
         }
     }
 
     Ok(())
-}
-
-fn normalize_version(version: &str) -> Result<String> {
-    // Ensure version has a 'v' prefix
-    if version.starts_with('v') {
-        Ok(version.to_string())
-    } else {
-        Ok(format!("v{}", version))
-    }
 }
 
 fn strip_v_prefix(version: &str) -> String {
@@ -159,7 +154,12 @@ fn strip_v_prefix(version: &str) -> String {
     }
 }
 
-fn sign_files(version_folder: &str, config_path: &str, firmware_version: &str) -> Result<()> {
+fn sign_files(
+    version_folder: &str,
+    config_path: &str,
+    firmware_version: &str,
+    is_developer: bool,
+) -> Result<()> {
     println!(
         "{}",
         format!("Signing files for version {}", firmware_version).bold()
@@ -180,6 +180,37 @@ fn sign_files(version_folder: &str, config_path: &str, firmware_version: &str) -
     // Sign app.bin
     print!(
         "Signing KeyOS image ({})...",
+        Path::new(&app_bin).file_name().unwrap().to_string_lossy()
+    );
+
+    let output = Command::new("cosign2")
+        .args([
+            "sign",
+            "-i",
+            &app_bin,
+            "-c",
+            config_path,
+            "--in-place",
+            "--binary-version",
+            firmware_version,
+        ])
+        .output()
+        .context(format!("{} cosign2 error", "✗".red()))?;
+
+    if !output.status.success() {
+        println!("{} Failed to sign", "✗".red());
+        return Err(SignerError::CommandFailed(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        )
+        .into());
+    }
+
+    println!("{}", "✓ Success".green());
+
+    // Sign recovery.bin
+    let app_bin = format!("{}/recovery.bin", version_folder);
+    print!(
+        "Signing Recovery OS image ({})...",
         Path::new(&app_bin).file_name().unwrap().to_string_lossy()
     );
 
@@ -254,6 +285,7 @@ fn sign_files(version_folder: &str, config_path: &str, firmware_version: &str) -
                         "--in-place",
                         "--binary-version",
                         firmware_version,
+                        if is_developer { "--developer" } else { "" },
                     ])
                     .output()
                     .context(format!("{} cosign2 error", "✗".red()))?;
