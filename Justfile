@@ -55,3 +55,12 @@ create-image VERSION OUTPUT="boot.img":
 print-hashes VERSION:
     @echo "Printing hashes for version {{VERSION}}"
     cargo run --manifest-path tools/image-builder/Cargo.toml -- print-hashes {{VERSION}}
+
+# Generate firmware manifest.json for a version
+generate-manifest VERSION OUTPUT="":
+    @echo "Generating firmware manifest for version {{VERSION}}"
+    @if [ "{{OUTPUT}}" = "" ]; then \
+        cargo run --manifest-path tools/manifest-gen/Cargo.toml -- {{VERSION}}; \
+    else \
+        cargo run --manifest-path tools/manifest-gen/Cargo.toml -- {{VERSION}} --output {{OUTPUT}}; \
+    fi

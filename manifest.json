@@ -1,0 +1,10 @@
+{
+  "baseVersion": "0.9.0",
+  "version": "1.0.0",
+  "signedSha256": "282caccb5c23d58a702942f9acdd1495dbacf81853821def42ac6df1876e7278",
+  "unsignedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "updateFilename": "KeyOS-v1.0.0.bin",
+  "signatureFilename": "KeyOS-v1.0.0.bin.sig",
+  "description": "KeyOS firmware update from v0.9.0 to v1.0.0",
+  "releaseDate": "2025-08-05"
+}
