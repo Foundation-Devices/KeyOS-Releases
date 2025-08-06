@@ -472,7 +472,7 @@ fn create_tar(
     let mut num_assets = 0;
     let common_dir = format!("{}/common", version_folder);
     let common_path = Path::new(&common_dir);
-    if common_path.is_dir() {
+    if common_path.exists() && common_path.is_dir() {
         for entry in fs::read_dir(common_path).context("Failed to read common directory")? {
             let entry = entry.context("Failed to read directory entry")?;
             let path = entry.path();
@@ -491,7 +491,36 @@ fn create_tar(
         }
     }
 
-    println!("{} Included {num_assets} assets", "✓".green());
+    // Add all recovery OS assets in the common directory
+    let mut num_assets_recovery_os = 0;
+    let common_dir = format!("{}/common-boot", version_folder);
+    let common_path = Path::new(&common_dir);
+    if common_path.exists() && common_path.is_dir() {
+        for entry in fs::read_dir(common_path).context("Failed to read common-boot directory")? {
+            let entry = entry.context("Failed to read directory entry")?;
+            let path = entry.path();
+
+            if path.is_file() {
+                files_to_include.push(path.to_string_lossy().to_string());
+                num_assets_recovery_os += 1;
+            } else if path.is_dir() {
+                // If it's a directory, include all files in it
+                for sub_entry in fs::read_dir(&path).context("Failed to read subdirectory")? {
+                    let sub_entry = sub_entry.context("Failed to read subdirectory entry")?;
+                    files_to_include.push(sub_entry.path().to_string_lossy().to_string());
+                    num_assets_recovery_os += 1;
+                }
+            }
+        }
+    }
+
+    println!("{} Included {num_assets} KeyOS assets", "✓".green());
+    if num_assets_recovery_os != 0 {
+        println!(
+            "{} Included {num_assets_recovery_os} Recovery OS assets",
+            "✓".green()
+        );
+    }
 
     println!(
         "Creating tar file: {}...",
