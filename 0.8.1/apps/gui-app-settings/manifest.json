@@ -1,0 +1,15 @@
+{
+  "appName": {
+    "en": "Settings"
+  },
+  "appDescription": {},
+  "appId": "0xc192b79230473875f159d4423d74d00f",
+  "appSignature": "0x00",
+  "servers": [],
+  "permissions": [
+    {
+      "server": "os/gui-server",
+      "messages": "0..128"
+    }
+  ]
+}
