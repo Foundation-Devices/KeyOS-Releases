@@ -1,0 +1,35 @@
+{
+  "appName": {
+    "en": "Onboarding"
+  },
+  "appDescription": {},
+  "appId": "0xdac5321775d449c11bc9c90f38067f8f",
+  "appSignature": "0x00",
+  "servers": [
+    {
+      "name": "os/onboarding",
+      "description": {
+        "en": "Onboarding server"
+      },
+      "messages": []
+    }
+  ],
+  "permissions": [
+    {
+      "server": "os/bt",
+      "messages": "0..128"
+    },
+    {
+      "server": "os/gui-server",
+      "messages": "0..128"
+    },
+    {
+      "server": "os/keycard",
+      "messages": "0..128"
+    },
+    {
+      "server": "os/nfc",
+      "messages": "0..128"
+    }
+  ]
+}
