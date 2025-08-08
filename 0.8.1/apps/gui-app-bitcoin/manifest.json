@@ -1,0 +1,15 @@
+{
+  "appName": {
+    "en": "Bitcoin Wallet"
+  },
+  "appDescription": {},
+  "appId": "0x426974636f696e2057616c6c65740000",
+  "appSignature": "0x00",
+  "servers": [],
+  "permissions": [
+    {
+      "server": "os/gui-server",
+      "messages": "0..128"
+    }
+  ]
+}
