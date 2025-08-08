@@ -1,0 +1,15 @@
+{
+  "appName": {
+    "en": "Authenticator"
+  },
+  "appDescription": {},
+  "appId": "0x41757468656e74696361746f72203246",
+  "appSignature": "0x00",
+  "servers": [],
+  "permissions": [
+    {
+      "server": "os/gui-server",
+      "messages": "0..128"
+    }
+  ]
+}
