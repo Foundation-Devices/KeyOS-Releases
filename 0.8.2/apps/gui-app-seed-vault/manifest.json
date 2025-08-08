@@ -1,0 +1,15 @@
+{
+  "appName": {
+    "en": "Seed Vault"
+  },
+  "appDescription": {},
+  "appId": "0x53656564205661756c74000000000000",
+  "appSignature": "0x00",
+  "servers": [],
+  "permissions": [
+    {
+      "server": "os/gui-server",
+      "messages": "0..128"
+    }
+  ]
+}
