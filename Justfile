@@ -11,6 +11,11 @@ sign-dev VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.t
     @echo "Signing all files for version {{VERSION}} with config {{CONFIG_PATH}}"
     cargo run --manifest-path tools/signer/Cargo.toml -- sign-files --developer {{VERSION}} {{CONFIG_PATH}}
 
+# Sign individual files with the provided key
+sign-dev-bl VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
+    @echo "Signing all files for version {{VERSION}} with config {{CONFIG_PATH}}"
+    cargo run --manifest-path tools/signer/Cargo.toml -- sign-files --developer --sign-bootloader {{VERSION}} {{CONFIG_PATH}}
+
 # Create tar file (only when all files have two signatures)
 create-tar VERSION:
     @echo "Creating tar file for version {{VERSION}}"
