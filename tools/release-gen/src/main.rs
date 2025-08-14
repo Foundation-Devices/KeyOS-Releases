@@ -1,7 +1,7 @@
 use {
     anyhow::Context,
     clap::Parser,
-    release_manifest::{Action, ReleaseManifest},
+    release_manifest::{Action, ReleaseManifest, Transaction},
     std::{
         fs::{self, File, ReadDir},
         io::{self, Read, Write},
@@ -192,13 +192,11 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
         }
     }
 
-    let actions = vec![Action::Transaction { actions }];
-
     let manifest = ReleaseManifest {
         label: args.label.clone(),
         mandatory: args.mandatory,
         date: chrono::Utc::now().date_naive().to_string(),
-        actions,
+        transactions: vec![Transaction::new(actions)],
     };
 
     manifest_file
