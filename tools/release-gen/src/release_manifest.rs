@@ -9,15 +9,27 @@ pub struct ReleaseManifest {
     pub label: String,
     pub mandatory: bool,
     pub date: String,
-    pub actions: Vec<Action>,
+    pub transactions: Vec<Transaction>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Transaction(Vec<Action>);
+
+impl Transaction {
+    pub fn new(actions: Vec<Action>) -> Self {
+        Self(actions)
+    }
+
+    #[cfg(test)]
+    pub fn actions(&self) -> &[Action] {
+        &self.0
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Action {
-    Transaction {
-        actions: Vec<Action>,
-    },
     #[serde(rename_all = "kebab-case")]
     Patch {
         patch_file: String,
