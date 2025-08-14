@@ -48,12 +48,9 @@ fn release_roundtrip() {
     assert!(manifest.mandatory);
     assert_eq!(manifest.date, chrono::Utc::now().date_naive().to_string());
 
-    assert_eq!(manifest.actions.len(), 1);
+    assert_eq!(manifest.transactions.len(), 1);
 
-    let Action::Transaction { ref actions } = manifest.actions[0] else {
-        panic!("Expected a single transaction action");
-    };
-
+    let actions = manifest.transactions[0].actions();
     for action in actions {
         match action {
             Action::Patch {
