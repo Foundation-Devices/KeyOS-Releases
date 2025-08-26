@@ -173,3 +173,5 @@ cd "$KEYOS_DIR"
 
 echo "[INFO] building \`boot.img\`"
 cargo xtask build-firmware-image
+
+echo "[INFO] done"
