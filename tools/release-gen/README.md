@@ -1,6 +1,6 @@
 # release-gen
 
-Command line tool for automatically generating KeyOS releases. See `--help` for more info.
+A Rust CLI tool for automatically generating KeyOS releases. See `--help` for more info.
 
 ## Dependencies
 
