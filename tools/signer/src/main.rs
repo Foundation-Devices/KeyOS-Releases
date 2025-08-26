@@ -275,18 +275,21 @@ fn sign_files(
 
                 let app_path = elf_path.to_str().unwrap();
 
+                let mut args = vec![
+                    "sign",
+                    "-i",
+                    app_path,
+                    "-c",
+                    config_path,
+                    "--in-place",
+                    "--binary-version",
+                    firmware_version,
+                ];
+                if is_developer {
+                    args.push("--developer");
+                }
                 let output = Command::new("cosign2")
-                    .args([
-                        "sign",
-                        "-i",
-                        app_path,
-                        "-c",
-                        config_path,
-                        "--in-place",
-                        "--binary-version",
-                        firmware_version,
-                        if is_developer { "--developer" } else { "" },
-                    ])
+                    .args(args)
                     .output()
                     .context(format!("{} cosign2 error", "✗".red()))?;
 
