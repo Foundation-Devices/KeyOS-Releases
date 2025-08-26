@@ -3,8 +3,9 @@ use {
     clap::Parser,
     release_manifest::{Action, ReleaseManifest, Transaction},
     std::{
+        fmt::Display,
         fs::{self, File, ReadDir},
-        io::{self, Read, Write},
+        io::{self, Read, Seek, Write},
         path::{Path, PathBuf},
         process::Command,
     },
@@ -15,6 +16,7 @@ mod release_manifest;
 mod test;
 
 const PATH_TO_STR_ERROR: &str = "Path should be a valid string";
+const COSIGN2_DEFAULT_HEADER_SIZE: u64 = 2048;
 
 /// `release-gen` traverses the two directories and crates a `release.tar` file
 /// that contains the manifest describing what actions to perform to reach the
@@ -62,7 +64,7 @@ pub fn run(args: Args) -> anyhow::Result<()> {
             anyhow::bail!(
                 r"updiff tool not found at {}
 Please make sure it's in your PATH or specify the path where it is installed. See `--help` for more information.",
-                absolute_path(args.updiff_path)
+                abs_path(args.updiff_path)
             );
         } else {
             anyhow::bail!("could not run updiff tool: {}", err.to_string());
@@ -74,27 +76,27 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
     if fs::exists(&args.out).context("Checking if output file exists")? {
         anyhow::bail!(
             "Output file {} already exists. Please remove it or specify a different output path.",
-            absolute_path(args.out)
+            abs_path(args.out)
         );
     }
     let out_dir = if let Some(parent_dir) = args.out.parent() {
         fs::create_dir_all(parent_dir)
-            .with_context(|| format!("Creating output dir: {}", absolute_path(parent_dir)))?;
+            .with_context(|| format!("Creating output dir: {}", abs_path(parent_dir)))?;
         parent_dir.to_path_buf()
     } else {
         std::env::current_dir().context("Reading current directory")?
     };
 
     let base_src_root = fs::read_dir(&args.base)
-        .with_context(|| format!("Reading base dir: {}", absolute_path(&args.base)))?;
+        .with_context(|| format!("Reading base dir: {}", abs_path(&args.base)))?;
     let new_src_root = fs::read_dir(&args.new)
-        .with_context(|| format!("Reading new dir: {}", absolute_path(&args.new)))?;
+        .with_context(|| format!("Reading new dir: {}", abs_path(&args.new)))?;
 
     let out_patch_dir = out_dir.join("patch");
     let manifest_file_path = out_dir.clone().join("manifest.json");
 
     fs::create_dir(&out_patch_dir)
-        .with_context(|| format!("Creating patch dir: {}", absolute_path(&out_patch_dir)))?;
+        .with_context(|| format!("Creating patch dir: {}", abs_path(&out_patch_dir)))?;
     let mut manifest_file =
         File::create_new(&manifest_file_path).expect("Manifest file should not exist");
 
@@ -133,17 +135,15 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
             let base_file_full = args.base.clone().join(base_file);
             let new_file_full = args.new.clone().join(base_file);
 
-            if !files_are_same(&base_file_full, &new_file_full)? {
+            if !files_have_same_content(&base_file_full, &new_file_full)? {
                 let patch_file = out_patch_dir.clone().join(base_file);
                 let patch_file_parent = patch_file
                     .parent()
                     .expect("Patch file should have a parent");
-                fs::create_dir_all(patch_file_parent).with_context(|| {
-                    format!("Creating dir: {}", absolute_path(patch_file_parent))
-                })?;
-                let _ = File::create_new(&patch_file).with_context(|| {
-                    format!("Creating patch file: {}", absolute_path(&patch_file))
-                })?;
+                fs::create_dir_all(patch_file_parent)
+                    .with_context(|| format!("Creating dir: {}", abs_path(patch_file_parent)))?;
+                let _ = File::create_new(&patch_file)
+                    .with_context(|| format!("Creating patch file: {}", abs_path(&patch_file)))?;
 
                 let output = Command::new(args.updiff_path.as_os_str())
                     .arg(&args.base_version)
@@ -181,18 +181,17 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
                 .parent()
                 .expect("Patch file should have parent");
             fs::create_dir_all(patch_file_parent)
-                .with_context(|| format!("Creating dir: {}", absolute_path(patch_file_parent)))?;
+                .with_context(|| format!("Creating dir: {}", abs_path(patch_file_parent)))?;
 
-            let mut out_file = fs::File::create_new(&patch_file_path).with_context(|| {
-                format!("Creating patch file: {}", absolute_path(&patch_file_path))
-            })?;
+            let mut out_file = fs::File::create_new(&patch_file_path)
+                .with_context(|| format!("Creating patch file: {}", abs_path(&patch_file_path)))?;
 
             let file_path = new_file.to_str().expect(PATH_TO_STR_ERROR).to_string();
             io::copy(&mut source_file, &mut out_file).with_context(|| {
                 format!(
                     "Copying file from {} to {}",
-                    absolute_path(source_file_path),
-                    absolute_path(patch_file_path)
+                    abs_path(source_file_path),
+                    abs_path(patch_file_path)
                 )
             })?;
             actions.push(Action::Add {
@@ -258,9 +257,8 @@ fn rec_get_all_files_in_tree(dir: ReadDir) -> anyhow::Result<Vec<PathBuf>> {
         } else if metadata.is_file() {
             file_paths.push(entry.path());
         } else if metadata.is_dir() {
-            let subdir = fs::read_dir(entry.path()).with_context(|| {
-                format!("Reading subdirectory: {}", absolute_path(entry.path()))
-            })?;
+            let subdir = fs::read_dir(entry.path())
+                .with_context(|| format!("Reading subdirectory: {}", abs_path(entry.path())))?;
             file_paths.extend(rec_get_all_files_in_tree(subdir)?);
         }
     }
@@ -268,20 +266,45 @@ fn rec_get_all_files_in_tree(dir: ReadDir) -> anyhow::Result<Vec<PathBuf>> {
     Ok(file_paths)
 }
 
-fn files_are_same(file_path1: &Path, file_path2: &Path) -> anyhow::Result<bool> {
+fn files_have_same_content(file_path1: &Path, file_path2: &Path) -> anyhow::Result<bool> {
     let metadata1 = fs::metadata(file_path1)
-        .with_context(|| format!("Reading metadata from: {}", absolute_path(file_path1)))?;
+        .with_context(|| format!("Reading metadata from: {}", abs_path(file_path1)))?;
     let metadata2 = fs::metadata(file_path2)
-        .with_context(|| format!("Reading metadata from: {}", absolute_path(file_path2)))?;
+        .with_context(|| format!("Reading metadata from: {}", abs_path(file_path2)))?;
 
     if metadata1.len() != metadata2.len() {
         return Ok(false);
     }
 
     let mut file1 = File::open(file_path1)
-        .with_context(|| format!("Opening file: {}", absolute_path(file_path1)))?;
+        .with_context(|| format!("Opening file: {}", abs_path(file_path1)))?;
     let mut file2 = File::open(file_path2)
-        .with_context(|| format!("Opening file: {}", absolute_path(file_path2)))?;
+        .with_context(|| format!("Opening file: {}", abs_path(file_path2)))?;
+
+    let Some(ext1) = file_path1.extension() else {
+        anyhow::bail!("File {} has no extension", abs_path(file_path1));
+    };
+    // Manifests do not get signed.
+    if ext1 != "json" {
+        debug_assert_eq!(
+            ext1,
+            file_path2
+                .extension()
+                .expect("files should have the same name"),
+        );
+
+        let both_files_have_cosign2_header = metadata1.len() > COSIGN2_DEFAULT_HEADER_SIZE
+            && metadata2.len() > COSIGN2_DEFAULT_HEADER_SIZE;
+        assert!(both_files_have_cosign2_header);
+
+        // Skip `cosign2` headers since those are always different.
+        file1
+            .seek(io::SeekFrom::Start(COSIGN2_DEFAULT_HEADER_SIZE))
+            .with_context(|| format!("Seeking in file: {}", abs_path(file_path1)))?;
+        file2
+            .seek(io::SeekFrom::Start(COSIGN2_DEFAULT_HEADER_SIZE))
+            .with_context(|| format!("Seeking in file: {}", abs_path(file_path2)))?;
+    }
 
     let mut buffer1 = [0; 1024];
     let mut buffer2 = [0; 1024];
@@ -289,10 +312,10 @@ fn files_are_same(file_path1: &Path, file_path2: &Path) -> anyhow::Result<bool> 
     loop {
         let bytes_read1 = file1
             .read(&mut buffer1)
-            .with_context(|| format!("Reading chunk from: {}", absolute_path(file_path1)))?;
+            .with_context(|| format!("Reading chunk from: {}", abs_path(file_path1)))?;
         let bytes_read2 = file2
             .read(&mut buffer2)
-            .with_context(|| format!("Reading chunk from: {}", absolute_path(file_path2)))?;
+            .with_context(|| format!("Reading chunk from: {}", abs_path(file_path2)))?;
 
         if bytes_read1 == 0 {
             debug_assert_eq!(bytes_read2, 0);
@@ -307,9 +330,9 @@ fn files_are_same(file_path1: &Path, file_path2: &Path) -> anyhow::Result<bool> 
     Ok(true)
 }
 
-fn absolute_path<P: AsRef<Path>>(path: P) -> String {
-    fs::canonicalize(path)
-        .unwrap()
+fn abs_path<P: AsRef<Path>>(path: P) -> impl Display {
+    std::path::absolute(path)
+        .expect("io error")
         .to_string_lossy()
         .to_string()
 }
