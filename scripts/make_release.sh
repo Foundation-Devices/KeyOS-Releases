@@ -2,14 +2,16 @@
 
 # This script takes in two directories, representing two versions of KeyOS (we'll call them old
 # and new), and produces two files:
-# 1) `boot.img` - a bootable image representing the old version of KeyOS.
-# 2) `release.tar` - a tarball that can be given to the KeyOS update service and will take KeyOS
-# from the old version to the new one.
+#
+# - `boot.img` - a bootable image representing the old version of KeyOS.
+# - `release.tar` - a tarball that can be given to the KeyOS update service and will take KeyOS
+#   from the old version to the new one.
 #
 # Both files will be generated in the same directory as this script.
 #
 # The third argument is the path to the `cosign2.toml` configuration file that will be used when
 # signing various files.
+# ----------------------------------------------------------------------------------------------
 #
 # Usage
 #
@@ -23,6 +25,7 @@
 # because some of the commands require the versions to be specified and it is just simpler if we
 # can use the directory name for that here. These don't have to be in the same directory as the
 # script.
+# ----------------------------------------------------------------------------------------------
 #
 # Prerequisites
 #
@@ -36,6 +39,25 @@
 #   following command in the root of the `keyos` repository:
 #
 #   > cargo install --path imports/cosign2/cosign2-bin
+# ----------------------------------------------------------------------------------------------
+#
+# Notes about input directories
+#
+# The input directories should contain KeyOS firmware components inside them. These components and
+# their locations inside the `keyos` repository are:
+#
+# - app.bin      | target/armv7a-unknown-xous-elf/release/images/app.bin
+# - recovery.bin | target/armv7a-unknown-xous-elf/release/images/recovery.bin
+# - apps/        | target/armv7a-unknown-xous-elf/release/apps/
+#
+# These files are generated inside inside `keyos` by running the following command:
+#
+# > cargo xtask build-all --dont-sign
+#
+# The `dont-sign` flag is required because we will be signing these files with the `signer` tool.
+#
+# You can create these directories and manually copy over the firmware components, or you can use
+# use the `make_release_input_dir.sh` bash script to automate this process.
 
 set -e
 
@@ -163,3 +185,5 @@ cd "$START_DIR"
 
 # Then copy the image over.
 cp "$KEYOS_DIR/boot.img" .
+
+echo "[INFO] done"

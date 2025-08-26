@@ -18,9 +18,9 @@ A Rust CLI tool for generating KeyOS release tarballs. See [this](/tools/release
 
 ### Scripts
 
-#### make_release.sh
+#### [make_release.sh](./scripts/make_release.sh)
 
-A bash script that automates creation of KeyOS releases, by using the above tools. See [this](./scripts/make_release.sh) for more info.
+A bash script that automates creation of KeyOS releases, by using the above tools.
 
 It takes two versions (old and new) of KeyOS (its firmware components) and performs the following steps:
 
@@ -30,6 +30,11 @@ It takes two versions (old and new) of KeyOS (its firmware components) and perfo
 
 These two files (the image and the tarball) can be used for a complete E2E test of the update procedure.
 
-#### make_release_for_update_demo.sh
+#### [make_release_input_dir.sh](./scripts/make_release_input_dir.sh)
 
-A bash script that creates a bootable disk image for the purposes of the `update-test` app. Used only for update service development as it does not require a complete E2E update procedure to be performed. Read the [script docs](./scripts/make_release_for_update_demo.sh) for more info.
+A simple bash script that takes a firmware version `vX.Y.Z` as input and generates a directory named `vX.Y.Z` that
+will contain all the necessary firmware components (based on the local `keyos` repository).
+
+#### [make_release_for_update_demo.sh](./scripts/make_release_for_update_demo.sh)
+
+A bash script that creates a bootable disk image for the purposes of the `update-test` app. Used only for update service development as it does not require a complete E2E update procedure to be performed. Read the script docs for more info.
