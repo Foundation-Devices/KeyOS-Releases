@@ -145,11 +145,22 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
                 let _ = File::create_new(&patch_file)
                     .with_context(|| format!("Creating patch file: {}", abs_path(&patch_file)))?;
 
+                let base_version = if args.base_version.starts_with('v') {
+                    args.base_version.clone()
+                } else {
+                    format!("v{}", args.base_version)
+                };
+                let new_version = if args.new_version.starts_with('v') {
+                    args.new_version.clone()
+                } else {
+                    format!("v{}", args.new_version)
+                };
+
                 let output = Command::new(args.updiff_path.as_os_str())
                     .arg(&args.base_version)
-                    .arg(base_file_full)
+                    .arg(&base_version)
                     .arg(&args.new_version)
-                    .arg(new_file_full)
+                    .arg(&new_version)
                     .arg(&patch_file)
                     .output()
                     .context("Running updiff command")?;
