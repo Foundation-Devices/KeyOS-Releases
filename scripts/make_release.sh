@@ -104,26 +104,26 @@ fi
 if [ ! -f "$RELEASE_GEN_TOOL" ]; then
     # Try the `release` directory instead of `debug`.
     echo "[WARN] release-gen tool not found at '$(realpath -m -q $RELEASE_GEN_TOOL)'. Trying release build..."
-    RELEASE_GEN_TOOL=../../release-gen/target/release/release-gen
+    RELEASE_GEN_TOOL=../tools/release-gen/target/release/release-gen
     if [ ! -f "$RELEASE_GEN_TOOL" ]; then
         # Could not find `release-gen`, build it.
         echo "[WARN] release-gen tool not found at '$(realpath -m -q $RELEASE_GEN_TOOL)'. Building it..."
         cd ../tools/release-gen
         cargo build --release
-        RELEASE_GEN_TOOL=../../release-gen/target/release/release-gen
+        RELEASE_GEN_TOOL=../tools/release-gen/target/release/release-gen
         cd "$START_DIR"
     fi
 fi
 if [ ! -f "$SIGNER_TOOL" ]; then
     # Try the `release` directory instead of `debug`.
     echo "[WARN] signer tool not found at '$(realpath -m -q $SIGNER_TOOL)'. Trying release build..."
-    SIGNER_TOOL=../../signer/target/release/signer
+    SIGNER_TOOL=../tools/signer/target/release/signer
     if [ ! -f "$SIGNER_TOOL" ]; then
         # Could not find `signer`, build it.
         echo "[WARN] signer tool not found at '$(realpath -m -q $SIGNER_TOOL)'. Building it..."
         cd ../tools/signer
         cargo build --release
-        SIGNER_TOOL=../../signer/target/release/signer
+        SIGNER_TOOL=../tools/signer/target/release/signer
         cd "$START_DIR"
     fi
 fi
@@ -158,8 +158,10 @@ NEW_VERSION_NO_V=${NEW_VERSION#v}
 echo "[INFO] signing files"
 
 # Run the `signer` tool to sign both versions.
-"$SIGNER_TOOL" sign-files "$OLD_VERSION" "$COSIGN2_CONFIG"
-"$SIGNER_TOOL" sign-files "$NEW_VERSION" "$COSIGN2_CONFIG"
+cp "$SIGNER_TOOL" .
+./signer sign-files "$OLD_VERSION" "$COSIGN2_CONFIG"
+./signer sign-files "$NEW_VERSION" "$COSIGN2_CONFIG"
+rm ./signer
 
 echo "[INFO] creating release tarball"
 
