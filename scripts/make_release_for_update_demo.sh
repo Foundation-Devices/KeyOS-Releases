@@ -7,7 +7,7 @@
 #
 # Usage
 #
-# > make_test_release.sh ./v0.1.0 ./v0.2.0
+# > make_release_for_update_demo.sh <old_version_dir> <new_version_dir> [<path_to_keyos_repo>]
 #
 # The script takes in two directories (two versions of `keyos`) and runs several commands that will,
 # in the end, produce `boot.img`. The image will be generated in the `keyos` directory, not in the
@@ -19,6 +19,10 @@
 # because some of the commands require the versions to be specified and it is just simpler if we
 # can use the directory name for that here. These don't have to be in the same directory as the
 # script.
+#
+# The third argument is the path to the `keyos` repository. This argument is optional and, if
+# not provided, the script will assume that the `keyos` repository is in the same directory as
+# `KeyOS-Releases`.
 #
 # Prerequisites
 #
@@ -91,57 +95,86 @@
 
 set -e
 
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $0 <old_version_dir> <new_version_dir>"
+# Print an error message in bold red.
+# Usage: error "Your error message"
+error() {
+    echo -e "\033[1;31mERROR\033[0m $1"
+}
+
+# Print a warning message in bold yellow.
+# Usage: warn "Your warning message"
+warn() {
+    echo -e "\033[1;33mWARN\033[0m $1"
+}
+
+# Print an info message in bold green.
+# Usage: info "Your info message"
+info() {
+    echo -e "\033[1;32mINFO\033[0m $1"
+}
+
+if [ ! -d .git ] || [ ! -f .git/config ] || ! grep -q "Foundation-Devices/KeyOS-Releases" .git/config; then
+    error "please run the script from the root of the 'KeyOS-Releases' repository"
+    exit 1
+fi
+
+if [ "$#" -ne 2 ] && [ "$#" -ne 3 ]; then
+    error "invalid number of arguments
+
+Usage: make_test_release.sh <old_version_dir> <new_version_dir> [<path_to_keyos_repo>]"
     exit 1
 fi
 
 OLD_VERSION_DIR=$1
 NEW_VERSION_DIR=$2
+KEYOS_DIR=${3:-../keyos}
 
 START_DIR=$(pwd)
 
-echo "[INFO] checking required directories and tools"
+info "checking required directories and tools"
 
 if [ ! -d "$OLD_VERSION_DIR" ]; then
-    echo "Error: Directory '$OLD_VERSION_DIR' does not exist."
+    error "directory '$OLD_VERSION_DIR' does not exist."
     exit 1
 fi
 if [ ! -d "$NEW_VERSION_DIR" ]; then
-    echo "Error: Directory '$NEW_VERSION_DIR' does not exist."
+    error "directory '$NEW_VERSION_DIR' does not exist."
     exit 1
 fi
 
-KEYOS_DIR=../../keyos
-UPDATE_DEMO_DIR=../../keyos/test-apps/update-test
+UPDATE_DEMO_DIR="$KEYOS_DIR"/test-apps/update-test
 
-RELEASE_GEN_TOOL=../tools/release-gen/target/debug/release-gen
-UPDIFF_TOOL=../../updiff/target/debug/updiff
+RELEASE_GEN_DIR=./tools/release-gen
+RELEASE_GEN_TOOL=./tools/release-gen/target/release/release-gen
+
+UPDIFF_TOOL_DIR=../updiff
+UPDIFF_TOOL=../updiff/target/release/updiff
 
 if [ ! -d "$KEYOS_DIR" ]; then
-    echo "Error: keyos project not found at '$KEYOS_DIR'. Please clone it from https://github.com/Foundation-Devices/keyos"
+    error "keyos project not found at '$KEYOS_DIR'. Please clone it from https://github.com/Foundation-Devices/keyos"
     exit 1
 fi
 
-if [ ! "$RELEASE_GEN_TOOL" ]; then
-    # Try the `release` directory instead of `debug`.
-    echo "Warning: release-gen tool not found at '$RELEASE_GEN_TOOL'. Trying release build..."
-    RELEASE_GEN_TOOL=../../release-gen/target/release/release-gen
-    if [ ! "$RELEASE_GEN_TOOL" ]; then
-        echo "Error: release-gen tool not found at '$RELEASE_GEN_TOOL'. It is in the same repository as this script, please build it with $(cargo build)"
-        exit 1
-    fi
-fi
+info "building required tools"
 
-if [ ! "$UPDIFF_TOOL" ]; then
-    # Try the `release` directory instead of `debug`.
-    echo "Warning: updiff tool not found at '$UPDIFF_TOOL'. Trying release build..."
-    UPDIFF_TOOL=../../updiff/target/release/updiff
-    if [ ! "$UPDIFF_TOOL" ]; then
-        echo "Error: updiff tool not found at '$UPDIFF_TOOL'. Please clone it from https://github.com/Foundation-Devices/updiff"
-        exit 1
-    fi
+# Build release-gen.
+if [ ! -d "$RELEASE_GEN_DIR" ]; then
+    error "release-gen tool not found at '$(realpath -m -q "$RELEASE_GEN_DIR")'. It should be in the same repository as this script."
+    exit 1
 fi
+cd "$RELEASE_GEN_DIR"
+cargo build --release
+cd "$START_DIR"
+
+# Build updiff.
+if [ ! -d "$UPDIFF_TOOL_DIR" ]; then
+    error "updiff tool not found at '$(realpath -m -q "$UPDIFF_TOOL_DIR")'. \
+Please clone it from https://github.com/Foundation-Devices/updiff"
+    exit 1
+fi
+cd "$UPDIFF_TOOL_DIR"
+cargo build --release
+cd "$START_DIR"
 
 # Strip path to get the versions only
 OLD_VERSION=${OLD_VERSION_DIR##*/}
@@ -150,7 +183,7 @@ NEW_VERSION=${NEW_VERSION_DIR##*/}
 # Strip the 'v'
 NEW_VERSION_FOR_COSIGN=${NEW_VERSION#v}
 
-echo "[INFO] creating release tarball and moving it into \`keyos\`"
+info "creating release tarball and moving it into 'keyos'"
 
 # Run `release-gen` and move the release tarball into the update demo.
 "$RELEASE_GEN_TOOL" "$OLD_VERSION" "$OLD_VERSION_DIR" "$NEW_VERSION" "$NEW_VERSION_DIR" --updiff-path "$UPDIFF_TOOL" -o ./release.tar
@@ -158,20 +191,20 @@ mv ./release.tar "$UPDATE_DEMO_DIR"
 
 cd "$KEYOS_DIR"
 
-echo "[INFO] signing release tarball with \`cosign2\`"
+info "signing release tarball with 'cosign2'"
 cosign2 sign -c cosign2.toml -i test-apps/update-test/release.tar --developer --in-place --binary-version "$NEW_VERSION_FOR_COSIGN"
 
-echo "[INFO] building \`app.bin\`"
+info "building 'app.bin'"
 cargo xtask build-all
 
 cd "$START_DIR"
 
-echo "[INFO] restoring old files"
+info "restoring old files"
 cp -r "$OLD_VERSION_DIR/apps" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release"
 
 cd "$KEYOS_DIR"
 
-echo "[INFO] building \`boot.img\`"
+info "building 'boot.img'"
 cargo xtask build-firmware-image
 
-echo "[INFO] done"
+info "done"
