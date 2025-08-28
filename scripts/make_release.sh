@@ -207,6 +207,7 @@ info "creating 'boot.img'"
 cp -r "$OLD_VERSION_DIR/apps" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release"
 cp "$OLD_VERSION_DIR/app.bin" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images"
 cp "$OLD_VERSION_DIR/recovery.bin" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images"
+cp release.tar "$KEYOS_DIR/release.tar"
 
 cd "$KEYOS_DIR"
 
