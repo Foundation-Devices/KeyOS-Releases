@@ -146,6 +146,8 @@ UPDATE_DEMO_DIR="$KEYOS_DIR"/test-apps/update-test
 
 RELEASE_GEN_DIR=./tools/release-gen
 RELEASE_GEN_TOOL=./tools/release-gen/target/release/release-gen
+SIGNER_DIR=./tools/signer
+SIGNER_TOOL=./tools/signer/target/release/signer
 
 UPDIFF_TOOL_DIR=../updiff
 UPDIFF_TOOL=../updiff/target/release/updiff
@@ -166,6 +168,15 @@ cd "$RELEASE_GEN_DIR"
 cargo build --release
 cd "$START_DIR"
 
+# Build signer.
+if [ ! -d "$SIGNER_DIR" ]; then
+    error "signer tool not found at '$(realpath -m -q "$SIGNER_DIR")'. It should be in the same repository as this script."
+    exit 1
+fi
+cd "$SIGNER_DIR"
+cargo build --release
+cd "$START_DIR"
+
 # Build updiff.
 if [ ! -d "$UPDIFF_TOOL_DIR" ]; then
     error "updiff tool not found at '$(realpath -m -q "$UPDIFF_TOOL_DIR")'. \
@@ -182,6 +193,21 @@ NEW_VERSION=${NEW_VERSION_DIR##*/}
 
 # Strip the 'v'
 NEW_VERSION_FOR_COSIGN=${NEW_VERSION#v}
+
+info "signing files"
+
+# Run the `signer` tool to sign both versions. It currently requires the input files to be in the
+# current directory, so we copy it over, run it, then delete it.
+cp "$SIGNER_TOOL" .
+./signer sign-files "$OLD_VERSION" "$COSIGN2_CONFIG" --developer || {
+    rm ./signer
+    exit 1
+}
+./signer sign-files "$NEW_VERSION" "$COSIGN2_CONFIG" --developer || {
+    rm ./signer
+    exit 1
+}
+rm ./signer
 
 info "creating release tarball and moving it into 'keyos'"
 
