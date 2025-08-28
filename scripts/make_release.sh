@@ -159,8 +159,8 @@ echo "[INFO] signing files"
 
 # Run the `signer` tool to sign both versions.
 cp "$SIGNER_TOOL" .
-./signer sign-files "$OLD_VERSION" "$COSIGN2_CONFIG"
-./signer sign-files "$NEW_VERSION" "$COSIGN2_CONFIG"
+./signer sign-files "$OLD_VERSION" "$COSIGN2_CONFIG" --developer
+./signer sign-files "$NEW_VERSION" "$COSIGN2_CONFIG" --developer
 rm ./signer
 
 echo "[INFO] creating release tarball"
