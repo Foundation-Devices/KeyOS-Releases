@@ -7,15 +7,19 @@
 # - `release.tar` - a tarball that can be given to the KeyOS update service and will take KeyOS
 #   from the old version to the new one.
 #
-# Both files will be generated in the same directory as this script.
+# Both files will be generated in the directory where the script is run from.
 #
 # The third argument is the path to the `cosign2.toml` configuration file that will be used when
 # signing various files.
+#
+# The fourth argument is the path to the `keyos` repository. This argument is optional and, if
+# not provided, the script will assume that the `keyos` repository is in the same directory as
+# `KeyOS-Releases`.
 # ----------------------------------------------------------------------------------------------
 #
 # Usage
 #
-# > make_release.sh ./v0.1.0 ./v0.2.0 ./cosign.toml
+# > make_release.sh <old_version_dir> <new_version_dir> <path_to_cosign2_config> [<path_to_keyos_repo>]
 #
 # For simplicity, name the two input directories something like:
 #
@@ -61,92 +65,111 @@
 
 set -e
 
-if [ "$#" -ne 3 ]; then
-    echo "Usage: $0 <old_version_dir> <new_version_dir> <cosign2_config>"
+# Print an error message in bold red.
+# Usage: error "Your error message"
+error() {
+    echo -e "\033[1;31mERROR\033[0m $1"
+}
+
+# Print a warning message in bold yellow.
+# Usage: warn "Your warning message"
+warn() {
+    echo -e "\033[1;33mWARN\033[0m $1"
+}
+
+# Print an info message in bold green.
+# Usage: info "Your info message"
+info() {
+    echo -e "\033[1;32mINFO\033[0m $1"
+}
+
+if [ ! -d .git ] || [ ! -f .git/config ] || ! grep -q "Foundation-Devices/KeyOS-Releases" .git/config; then
+    error "please run the script from the root of the 'KeyOS-Releases' repository"
+    exit 1
+fi
+
+if [ "$#" -ne 3 ] && [ "$#" -ne 4 ]; then
+    echo "invalid number of arguments
+
+Usage: make_release.sh <old_version_dir> <new_version_dir> <path_to_cosign2_config> [<path_to_keyos_repo>]"
     exit 1
 fi
 
 OLD_VERSION_DIR=$1
 NEW_VERSION_DIR=$2
 COSIGN2_CONFIG=$3
+KEYOS_DIR=${4:-../keyos}
 
 START_DIR=$(pwd)
 
-echo "[INFO] checking required directories and tools"
+info "checking required directories and tools"
+
+if [ -f release.tar ] || [ -f boot.img ]; then
+    warn "release.tar and/or boot.img already exist in the current directory. Would you like to overwrite them? (y/n)"
+    read -r response
+    if [[ "$response" == "y" ]]; then
+        rm -f release.tar boot.img
+    else
+        info "Exiting without making any changes."
+        exit 0
+    fi
+fi
 
 if [ ! -d "$OLD_VERSION_DIR" ]; then
-    echo "[ERROR] Directory '$OLD_VERSION_DIR' does not exist."
+    error "directory '$OLD_VERSION_DIR' does not exist."
     exit 1
 fi
 if [ ! -d "$NEW_VERSION_DIR" ]; then
-    echo "[ERROR] Directory '$NEW_VERSION_DIR' does not exist."
+    error "directory '$NEW_VERSION_DIR' does not exist."
     exit 1
 fi
 if [ ! -f "$COSIGN2_CONFIG" ]; then
-    echo "[ERROR] File '$COSIGN2_CONFIG' does not exist."
+    error "dile '$COSIGN2_CONFIG' does not exist."
     exit 1
 fi
 
-KEYOS_DIR=../../keyos
+RELEASE_GEN_DIR=./tools/release-gen
+RELEASE_GEN_TOOL=./tools/release-gen/target/release/release-gen
+SIGNER_DIR=./tools/signer
+SIGNER_TOOL=./tools/signer/target/release/signer
 
-RELEASE_GEN_TOOL=../tools/release-gen/target/debug/release-gen
-SIGNER_TOOL=../tools/signer/target/debug/signer
-
-UPDIFF_TOOL_DIR=../../updiff
-UPDIFF_TOOL=../../updiff/target/debug/updiff
+UPDIFF_TOOL_DIR=../updiff
+UPDIFF_TOOL=../updiff/target/release/updiff
 
 if [ ! -d "$KEYOS_DIR" ]; then
-    echo "[ERROR] keyos project not found at '$(realpath -m -q $KEYOS_DIR)'. \
+    error "keyos project not found at '$(realpath -m -q "$KEYOS_DIR")'. \
 Please clone it from https://github.com/Foundation-Devices/keyos"
     exit 1
 fi
 
-if [ ! -f "$RELEASE_GEN_TOOL" ]; then
-    # Try the `release` directory instead of `debug`.
-    echo "[WARN] release-gen tool not found at '$(realpath -m -q $RELEASE_GEN_TOOL)'. Trying release build..."
-    RELEASE_GEN_TOOL=../tools/release-gen/target/release/release-gen
-    if [ ! -f "$RELEASE_GEN_TOOL" ]; then
-        # Could not find `release-gen`, build it.
-        echo "[WARN] release-gen tool not found at '$(realpath -m -q $RELEASE_GEN_TOOL)'. Building it..."
-        cd ../tools/release-gen
-        cargo build --release
-        RELEASE_GEN_TOOL=../tools/release-gen/target/release/release-gen
-        cd "$START_DIR"
-    fi
-fi
-if [ ! -f "$SIGNER_TOOL" ]; then
-    # Try the `release` directory instead of `debug`.
-    echo "[WARN] signer tool not found at '$(realpath -m -q $SIGNER_TOOL)'. Trying release build..."
-    SIGNER_TOOL=../tools/signer/target/release/signer
-    if [ ! -f "$SIGNER_TOOL" ]; then
-        # Could not find `signer`, build it.
-        echo "[WARN] signer tool not found at '$(realpath -m -q $SIGNER_TOOL)'. Building it..."
-        cd ../tools/signer
-        cargo build --release
-        SIGNER_TOOL=../tools/signer/target/release/signer
-        cd "$START_DIR"
-    fi
-fi
+info "building required tools"
 
-if [ ! -f "$UPDIFF_TOOL" ]; then
-    # Try the `release` directory instead of `debug`.
-    echo "[WARN] updiff tool not found at '$(realpath -m -q $UPDIFF_TOOL)'. Trying release build..."
-    UPDIFF_TOOL=../../updiff/target/release/updiff
-    if [ ! -f "$UPDIFF_TOOL" ]; then
-        if [ ! -d "$UPDIFF_TOOL_DIR" ]; then
-            echo "[ERROR] updiff tool not found at '$(realpath -m -q $UPDIFF_TOOL)'. \
+# Build release-gen and signer.
+if [ ! -d "$RELEASE_GEN_DIR" ]; then
+    error "release-gen tool not found at '$(realpath -m -q "$RELEASE_GEN_DIR")'. It should be in the same repository as this script."
+    exit 1
+fi
+cd "$RELEASE_GEN_DIR"
+cargo build --release
+cd "$START_DIR"
+
+if [ ! -d "$SIGNER_DIR" ]; then
+    error "signer tool not found at '$(realpath -m -q "$SIGNER_DIR")'. It should be in the same repository as this script."
+    exit 1
+fi
+cd "$SIGNER_DIR"
+cargo build --release
+cd "$START_DIR"
+
+# Build updiff.
+if [ ! -d "$UPDIFF_TOOL_DIR" ]; then
+    error "updiff tool not found at '$(realpath -m -q "$UPDIFF_TOOL_DIR")'. \
 Please clone it from https://github.com/Foundation-Devices/updiff"
-            exit 1
-        fi
-
-        # Could not find `updiff`, but the repository exists. Build it.
-        cd "$UPDIFF_TOOL_DIR"
-        echo "[WARN] updiff tool not found at '$(realpath -m -q $UPDIFF_TOOL)'. Building it..."
-        cargo build --release
-        UPDIFF_TOOL=../../updiff/target/release/updiff
-        cd "$START_DIR"
-    fi
+    exit 1
 fi
+cd "$UPDIFF_TOOL_DIR"
+cargo build --release
+cd "$START_DIR"
 
 # Strip path to get the versions only.
 OLD_VERSION=${OLD_VERSION_DIR##*/}
@@ -155,23 +178,30 @@ NEW_VERSION=${NEW_VERSION_DIR##*/}
 # Strip the 'v'.
 NEW_VERSION_NO_V=${NEW_VERSION#v}
 
-echo "[INFO] signing files"
+info "signing files"
 
-# Run the `signer` tool to sign both versions.
+# Run the `signer` tool to sign both versions. It currently requires the input files to be in the
+# current directory, so we copy it over, run it, then delete it.
 cp "$SIGNER_TOOL" .
-./signer sign-files "$OLD_VERSION" "$COSIGN2_CONFIG" --developer
-./signer sign-files "$NEW_VERSION" "$COSIGN2_CONFIG" --developer
+./signer sign-files "$OLD_VERSION" "$COSIGN2_CONFIG" --developer || {
+    rm ./signer
+    exit 1
+}
+./signer sign-files "$NEW_VERSION" "$COSIGN2_CONFIG" --developer || {
+    rm ./signer
+    exit 1
+}
 rm ./signer
 
-echo "[INFO] creating release tarball"
+info "creating release tarball"
 
 # Run `release-gen` to create the release tarball.
 "$RELEASE_GEN_TOOL" "$OLD_VERSION" "$OLD_VERSION_DIR" "$NEW_VERSION" "$NEW_VERSION_DIR" --updiff-path "$UPDIFF_TOOL" -o ./release.tar
 
-echo "[INFO] signing release tarball with \`cosign2\`"
+info "signing release tarball with 'cosign2'"
 cosign2 sign -c "$COSIGN2_CONFIG" -i ./release.tar --developer --in-place --binary-version "$NEW_VERSION_NO_V"
 
-echo "[INFO] creating \`boot.img\`"
+info "creating 'boot.img'"
 
 # Restore old files and combine them into the image.
 cp -r "$OLD_VERSION_DIR/apps" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release"
@@ -180,7 +210,7 @@ cp "$OLD_VERSION_DIR/recovery.bin" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/re
 
 cd "$KEYOS_DIR"
 
-echo "[INFO] building \`boot.img\`"
+info "building 'boot.img'"
 cargo xtask build-firmware-image
 
 cd "$START_DIR"
@@ -188,4 +218,4 @@ cd "$START_DIR"
 # Then copy the image over.
 cp "$KEYOS_DIR/boot.img" .
 
-echo "[INFO] done"
+info "done"
