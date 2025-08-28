@@ -293,9 +293,16 @@ fn files_have_same_content(file_path1: &Path, file_path2: &Path) -> anyhow::Resu
                 .expect("files should have the same name"),
         );
 
+        // This does not necessarily mean that the files have the header, but that it is
+        // safe to seek this much into both files.
         let both_files_have_cosign2_header = metadata1.len() > COSIGN2_DEFAULT_HEADER_SIZE
             && metadata2.len() > COSIGN2_DEFAULT_HEADER_SIZE;
-        assert!(both_files_have_cosign2_header);
+        anyhow::ensure!(
+            both_files_have_cosign2_header,
+            "Files {} and {} are too small to contain cosign2 headers",
+            abs_path(file_path1),
+            abs_path(file_path2)
+        );
 
         // Skip `cosign2` headers since those are always different.
         file1
@@ -332,7 +339,7 @@ fn files_have_same_content(file_path1: &Path, file_path2: &Path) -> anyhow::Resu
 
 fn abs_path<P: AsRef<Path>>(path: P) -> impl Display {
     std::path::absolute(path)
-        .expect("io error")
+        .expect("failed to get absolute path")
         .to_string_lossy()
         .to_string()
 }
