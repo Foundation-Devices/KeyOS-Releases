@@ -124,7 +124,7 @@ if [ ! -d "$NEW_VERSION_DIR" ]; then
     exit 1
 fi
 if [ ! -f "$COSIGN2_CONFIG" ]; then
-    error "dile '$COSIGN2_CONFIG' does not exist."
+    error "file '$COSIGN2_CONFIG' does not exist."
     exit 1
 fi
 
