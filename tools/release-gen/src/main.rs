@@ -1,3 +1,6 @@
+#[cfg(not(test))]
+use std::io::Seek;
+
 use {
     anyhow::Context,
     clap::Parser,
@@ -5,7 +8,7 @@ use {
     std::{
         fmt::Display,
         fs::{self, File, ReadDir},
-        io::{self, Read, Seek, Write},
+        io::{self, Read, Write},
         path::{Path, PathBuf},
         process::Command,
     },
@@ -16,6 +19,7 @@ mod release_manifest;
 mod test;
 
 const PATH_TO_STR_ERROR: &str = "Path should be a valid string";
+#[cfg(not(test))]
 const COSIGN2_DEFAULT_HEADER_SIZE: u64 = 2048;
 
 /// `release-gen` traverses the two directories and crates a `release.tar` file
@@ -281,36 +285,41 @@ fn files_have_same_content(file_path1: &Path, file_path2: &Path) -> anyhow::Resu
     let mut file2 = File::open(file_path2)
         .with_context(|| format!("Opening file: {}", abs_path(file_path2)))?;
 
-    let Some(ext1) = file_path1.extension() else {
-        anyhow::bail!("File {} has no extension", abs_path(file_path1));
-    };
-    // Manifests do not get signed.
-    if ext1 != "json" {
-        debug_assert_eq!(
-            ext1,
-            file_path2
-                .extension()
-                .expect("files should have the same name"),
-        );
+    #[cfg(not(test))]
+    {
+        // Skip cosign2 headers. Manifests do not get signed, so we don't need to do
+        // this if it's a JSON file.
+        let Some(ext1) = file_path1.extension() else {
+            anyhow::bail!("File {} has no extension", abs_path(file_path1));
+        };
 
-        // This does not necessarily mean that the files have the header, but that it is
-        // safe to seek this much into both files.
-        let both_files_have_cosign2_header = metadata1.len() > COSIGN2_DEFAULT_HEADER_SIZE
-            && metadata2.len() > COSIGN2_DEFAULT_HEADER_SIZE;
-        anyhow::ensure!(
-            both_files_have_cosign2_header,
-            "Files {} and {} are too small to contain cosign2 headers",
-            abs_path(file_path1),
-            abs_path(file_path2)
-        );
+        if ext1 != "json" {
+            debug_assert_eq!(
+                ext1,
+                file_path2
+                    .extension()
+                    .expect("files should have the same name"),
+            );
 
-        // Skip `cosign2` headers since those are always different.
-        file1
-            .seek(io::SeekFrom::Start(COSIGN2_DEFAULT_HEADER_SIZE))
-            .with_context(|| format!("Seeking in file: {}", abs_path(file_path1)))?;
-        file2
-            .seek(io::SeekFrom::Start(COSIGN2_DEFAULT_HEADER_SIZE))
-            .with_context(|| format!("Seeking in file: {}", abs_path(file_path2)))?;
+            // This does not necessarily mean that the files have the header, but that it is
+            // safe to seek this much into both files.
+            let both_files_have_cosign2_header = metadata1.len() > COSIGN2_DEFAULT_HEADER_SIZE
+                && metadata2.len() > COSIGN2_DEFAULT_HEADER_SIZE;
+            anyhow::ensure!(
+                both_files_have_cosign2_header,
+                "Files {} and {} are too small to contain cosign2 headers",
+                abs_path(file_path1),
+                abs_path(file_path2)
+            );
+
+            // Skip `cosign2` headers since those are always different.
+            file1
+                .seek(io::SeekFrom::Start(COSIGN2_DEFAULT_HEADER_SIZE))
+                .with_context(|| format!("Seeking in file: {}", abs_path(file_path1)))?;
+            file2
+                .seek(io::SeekFrom::Start(COSIGN2_DEFAULT_HEADER_SIZE))
+                .with_context(|| format!("Seeking in file: {}", abs_path(file_path2)))?;
+        }
     }
 
     let mut buffer1 = [0; 1024];
