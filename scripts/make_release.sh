@@ -207,6 +207,8 @@ info "creating 'boot.img'"
 cp -r "$OLD_VERSION_DIR/apps" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release"
 cp "$OLD_VERSION_DIR/app.bin" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images"
 cp "$OLD_VERSION_DIR/recovery.bin" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images"
+
+# Temporarily copy this into `keyos` to include it in `boot.img`.
 cp release.tar "$KEYOS_DIR/release.tar"
 
 cd "$KEYOS_DIR"
@@ -215,6 +217,9 @@ info "building 'boot.img'"
 cargo xtask build-firmware-image
 
 cd "$START_DIR"
+
+# Clean up the temporary copy.
+rm -f "$KEYOS_DIR/release.tar"
 
 # Then copy the image over.
 cp "$KEYOS_DIR/boot.img" .
