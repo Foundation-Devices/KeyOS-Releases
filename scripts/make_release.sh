@@ -51,7 +51,6 @@
 # their locations inside the `keyos` repository are:
 #
 # - app.bin      | target/armv7a-unknown-xous-elf/release/images/app.bin
-# - recovery.bin | target/armv7a-unknown-xous-elf/release/images/recovery.bin
 # - apps/        | target/armv7a-unknown-xous-elf/release/apps/
 #
 # These files are generated inside inside `keyos` by running the following command:
@@ -204,9 +203,8 @@ cosign2 sign -c "$COSIGN2_CONFIG" -i ./release.tar --developer --in-place --bina
 info "creating 'boot.img'"
 
 # Restore old files and combine them into the image.
-cp -r "$OLD_VERSION_DIR/apps" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release"
 cp "$OLD_VERSION_DIR/app.bin" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images"
-cp "$OLD_VERSION_DIR/recovery.bin" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images"
+cp -r "$OLD_VERSION_DIR/apps" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release"
 
 # Temporarily copy this into `keyos` to include it in `boot.img`.
 cp release.tar "$KEYOS_DIR/release.tar"

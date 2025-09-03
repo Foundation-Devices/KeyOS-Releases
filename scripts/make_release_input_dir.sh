@@ -6,7 +6,6 @@
 # These components and their locations inside the `keyos` repository are:
 #
 # - app.bin      | target/armv7a-unknown-xous-elf/release/images/app.bin
-# - recovery.bin | target/armv7a-unknown-xous-elf/release/images/recovery.bin
 # - apps/        | target/armv7a-unknown-xous-elf/release/apps/
 #
 # Requires the `keyos` repository to run. Path to it can be passed as an optional last argument
@@ -80,7 +79,6 @@ info "preparing release input directory"
 mkdir "$FIRMWARE_VERSION"
 
 cp "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images/app.bin" "$FIRMWARE_VERSION"
-cp "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images/recovery.bin" "$FIRMWARE_VERSION"
 cp -r "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/apps/" "$FIRMWARE_VERSION"
 
 info "done"
