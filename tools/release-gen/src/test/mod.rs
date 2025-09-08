@@ -11,6 +11,16 @@ use {
     },
 };
 
+struct CleanupGuard;
+
+impl Drop for CleanupGuard {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_dir_all("src/test/fixtures/out") {
+            eprintln!("Failed to clean up test output directory: {}", e);
+        }
+    }
+}
+
 #[test]
 fn release_roundtrip() {
     let updiff_path: PathBuf = std::env::var("UPDIFF_PATH")
@@ -33,6 +43,8 @@ fn release_roundtrip() {
         out: out_path.clone(),
         updiff_path,
     };
+
+    let _cleanup_guard = CleanupGuard;
 
     run(args).unwrap();
 
@@ -80,18 +92,15 @@ fn release_roundtrip() {
                     decoder.read_to_end(&mut buf).unwrap();
                     buf
                 };
+                // Assuming the size did not change drastically.
                 let mut patched_file_buf = Vec::with_capacity(base_file_buf.len());
 
-                bsdiff::patch(
-                    &base_file_buf,
-                    &mut patch_file_buf.as_slice(),
-                    &mut patched_file_buf,
-                )
-                .unwrap();
+                let patch = qbsdiff::Bspatch::new(&patch_file_buf).unwrap();
+                patch.apply(&base_file_buf, &mut patched_file_buf).unwrap();
 
                 let new_file_buf = {
                     let mut new_file = File::open(new_file_full).unwrap();
-                    let mut buf = vec![];
+                    let mut buf = Vec::with_capacity(patched_file_buf.len());
                     File::read_to_end(&mut new_file, &mut buf).unwrap();
                     buf
                 };
@@ -115,6 +124,4 @@ fn release_roundtrip() {
             }
         }
     }
-
-    std::fs::remove_dir_all("src/test/fixtures/out").unwrap();
 }
