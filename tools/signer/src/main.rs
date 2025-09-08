@@ -207,37 +207,6 @@ fn sign_files(
 
     println!("{}", "✓ Success".green());
 
-    // Sign recovery.bin
-    let app_bin = format!("{}/recovery.bin", version_folder);
-    print!(
-        "Signing Recovery OS image ({})...",
-        Path::new(&app_bin).file_name().unwrap().to_string_lossy()
-    );
-
-    let output = Command::new("cosign2")
-        .args([
-            "sign",
-            "-i",
-            &app_bin,
-            "-c",
-            config_path,
-            "--in-place",
-            "--binary-version",
-            firmware_version,
-        ])
-        .output()
-        .context(format!("{} cosign2 error", "✗".red()))?;
-
-    if !output.status.success() {
-        println!("{} Failed to sign", "✗".red());
-        return Err(SignerError::CommandFailed(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        )
-        .into());
-    }
-
-    println!("{}", "✓ Success".green());
-
     // Sign each dynamically loadable app
     println!(
         "\n{}",
@@ -275,18 +244,21 @@ fn sign_files(
 
                 let app_path = elf_path.to_str().unwrap();
 
+                let mut args = vec![
+                    "sign",
+                    "-i",
+                    app_path,
+                    "-c",
+                    config_path,
+                    "--in-place",
+                    "--binary-version",
+                    firmware_version,
+                ];
+                if is_developer {
+                    args.push("--developer");
+                }
                 let output = Command::new("cosign2")
-                    .args([
-                        "sign",
-                        "-i",
-                        app_path,
-                        "-c",
-                        config_path,
-                        "--in-place",
-                        "--binary-version",
-                        firmware_version,
-                        if is_developer { "--developer" } else { "" },
-                    ])
+                    .args(args)
                     .output()
                     .context(format!("{} cosign2 error", "✗".red()))?;
 
