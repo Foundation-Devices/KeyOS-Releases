@@ -144,48 +144,12 @@ fi
 
 UPDATE_DEMO_DIR="$KEYOS_DIR"/test-apps/update-test
 
-RELEASE_GEN_DIR=./tools/release-gen
-RELEASE_GEN_TOOL=./tools/release-gen/target/release/release-gen
-SIGNER_DIR=./tools/signer
-SIGNER_TOOL=./tools/signer/target/release/signer
-
-UPDIFF_TOOL_DIR=../updiff
-UPDIFF_TOOL=../updiff/target/release/updiff
-
 if [ ! -d "$KEYOS_DIR" ]; then
     error "keyos project not found at '$KEYOS_DIR'. Please clone it from https://github.com/Foundation-Devices/keyos"
     exit 1
 fi
 
-info "building required tools"
-
-# Build release-gen.
-if [ ! -d "$RELEASE_GEN_DIR" ]; then
-    error "release-gen tool not found at '$(realpath -m -q "$RELEASE_GEN_DIR")'. It should be in the same repository as this script."
-    exit 1
-fi
-cd "$RELEASE_GEN_DIR"
-cargo build --release
-cd "$START_DIR"
-
-# Build signer.
-if [ ! -d "$SIGNER_DIR" ]; then
-    error "signer tool not found at '$(realpath -m -q "$SIGNER_DIR")'. It should be in the same repository as this script."
-    exit 1
-fi
-cd "$SIGNER_DIR"
-cargo build --release
-cd "$START_DIR"
-
-# Build updiff.
-if [ ! -d "$UPDIFF_TOOL_DIR" ]; then
-    error "updiff tool not found at '$(realpath -m -q "$UPDIFF_TOOL_DIR")'. \
-Please clone it from https://github.com/Foundation-Devices/updiff"
-    exit 1
-fi
-cd "$UPDIFF_TOOL_DIR"
-cargo build --release
-cd "$START_DIR"
+info "checking required tools"
 
 # Strip path to get the versions only
 OLD_VERSION=${OLD_VERSION_DIR##*/}
@@ -196,23 +160,14 @@ NEW_VERSION_FOR_COSIGN=${NEW_VERSION#v}
 
 info "signing files"
 
-# Run the `signer` tool to sign both versions. It currently requires the input files to be in the
-# current directory, so we copy it over, run it, then delete it.
-cp "$SIGNER_TOOL" .
-./signer sign-files "$OLD_VERSION" "$COSIGN2_CONFIG" --developer || {
-    rm ./signer
-    exit 1
-}
-./signer sign-files "$NEW_VERSION" "$COSIGN2_CONFIG" --developer || {
-    rm ./signer
-    exit 1
-}
-rm ./signer
+# Run the `signer` tool to sign both versions.
+cargo run --release -p signer -- sign-files "$OLD_VERSION" "$COSIGN2_CONFIG" --developer || exit 1
+cargo run --release -p signer -- sign-files "$NEW_VERSION" "$COSIGN2_CONFIG" --developer || exit 1
 
 info "creating release tarball and moving it into 'keyos'"
 
 # Run `release-gen` and move the release tarball into the update demo.
-"$RELEASE_GEN_TOOL" "$OLD_VERSION" "$OLD_VERSION_DIR" "$NEW_VERSION" "$NEW_VERSION_DIR" --updiff-path "$UPDIFF_TOOL" -o ./release.tar
+cargo run --release -p release-gen -- "$OLD_VERSION" "$OLD_VERSION_DIR" "$NEW_VERSION" "$NEW_VERSION_DIR" -o ./release.tar
 mv ./release.tar "$UPDATE_DEMO_DIR"
 
 cd "$KEYOS_DIR"
