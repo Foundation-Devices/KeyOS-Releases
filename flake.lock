@@ -28,11 +28,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1757413059,
-        "narHash": "sha256-8Re+FRJ1p1FgM6spIl7ttnljrf5axplo2Cbw9mE0H6A=",
+        "lastModified": 1757443804,
+        "narHash": "sha256-W07gkGPsU1QmhNuwXDN5fv7Wgiwb+IdX/UTsvGP6WE0=",
         "ref": "refs/heads/dev-v0.10.0",
-        "rev": "0b7628f9fc9ba50c26b1d25c75e48b2195d315ed",
-        "revCount": 13195,
+        "rev": "7f78d257afee773bd828c36c442df012309383f3",
+        "revCount": 13201,
         "type": "git",
         "url": "ssh://git@github.com/Foundation-Devices/KeyOS"
       },
