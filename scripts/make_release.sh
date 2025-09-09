@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # This script takes in two directories, representing two versions of KeyOS (we'll call them old
 # and new), and produces two files:
