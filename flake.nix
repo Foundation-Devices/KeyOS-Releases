@@ -26,7 +26,8 @@
         pkgs = import nixpkgs {
           inherit system;
         };
-        keyosShell = keyos.devShells.${system}.default;
+        # using build shell bc faster than full dev shell
+        keyosShell = keyos.devShells.${system}.build;
 
         updiffPkg = pkgs.rustPlatform.buildRustPackage {
           pname = "updiff";
@@ -34,25 +35,15 @@
           src = updiff;
           cargoLock.lockFile = "${updiff}/Cargo.lock";
         };
-      in {
-        default = pkgs.mkShellNoCC {
-          inherit
-            (keyosShell)
-            strictDeps
-            hardeningDisable
-            buildInputs
-            LD_LIBRARY_PATH
-            LIBCLANG_PATH
-            shellHook
-            ;
 
-          packages =
-            keyosShell.packages
-            ++ [
-              updiffPkg
-              pkgs.bzip2
-            ];
-        };
+        customPackages = with pkgs; [
+          updiffPkg
+          bzip2
+        ];
+      in {
+        default = keyosShell.overrideAttrs (keyos: {
+          nativeBuildInputs = keyos.nativeBuildInputs ++ customPackages;
+        });
       }
     );
   };
