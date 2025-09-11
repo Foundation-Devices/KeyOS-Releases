@@ -39,6 +39,7 @@
         customPackages = with pkgs; [
           updiffPkg
           bzip2
+          gnutar
         ];
       in {
         default = keyosShell.overrideAttrs (keyos: {

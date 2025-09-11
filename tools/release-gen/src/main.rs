@@ -221,10 +221,26 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
         )
         .context("Writing to manifest.json")?;
 
-    let out_file = File::create(&args.out).context("Creating output file")?;
-    let mut tar = tar::Builder::new(out_file);
-    tar.append_dir_all("patch", &out_patch_dir)?;
-    tar.append_file("manifest.json", &mut manifest_file)?;
+    manifest_file.sync_all()?;
+
+    let tar_cmd = std::process::Command::new("tar")
+        .args(&[
+            "-cf",
+            args.out.to_str().unwrap(),
+            "-C",
+            out_dir.to_str().unwrap(),
+            "patch",
+            "manifest.json",
+        ])
+        .output()
+        .context("Failed to execute tar command")?;
+
+    if !tar_cmd.status.success() {
+        return Err(anyhow::anyhow!(
+            "tar command failed: {}",
+            String::from_utf8_lossy(&tar_cmd.stderr)
+        ));
+    }
 
     Ok(())
 }
