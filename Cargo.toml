@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "tools/image-builder",
+    "tools/release-gen",
+    "tools/signer",
+]
+resolver = "2"

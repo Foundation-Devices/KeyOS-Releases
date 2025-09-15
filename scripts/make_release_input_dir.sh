@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # A simple script that takes a firmware version as input and generates a new directory with the
 # KeyOS firmware components inside it.
