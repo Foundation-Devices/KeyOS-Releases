@@ -24,7 +24,7 @@ impl Drop for CleanupGuard {
 #[test]
 fn release_roundtrip() {
     let updiff_path: PathBuf = std::env::var("UPDIFF_PATH")
-        .expect("updiff path should exist")
+        .unwrap_or_else(|_| String::from("updiff"))
         .into();
     let base_ver = String::from("v0.0.1");
     let base_dir = PathBuf::from("src/test/fixtures/base/");

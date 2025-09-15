@@ -1,0 +1,119 @@
+{
+  "nodes": {
+    "fenix": {
+      "inputs": {
+        "nixpkgs": [
+          "keyos",
+          "nixpkgs"
+        ],
+        "rust-analyzer-src": "rust-analyzer-src"
+      },
+      "locked": {
+        "lastModified": 1756795219,
+        "narHash": "sha256-tKBQtz1JLKWrCJUxVkHKR+YKmVpm0KZdJdPWmR2slQ8=",
+        "owner": "nix-community",
+        "repo": "fenix",
+        "rev": "80dbdab137f2809e3c823ed027e1665ce2502d74",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "fenix",
+        "type": "github"
+      }
+    },
+    "keyos": {
+      "inputs": {
+        "fenix": "fenix",
+        "nixpkgs": "nixpkgs"
+      },
+      "locked": {
+        "lastModified": 1757443804,
+        "narHash": "sha256-W07gkGPsU1QmhNuwXDN5fv7Wgiwb+IdX/UTsvGP6WE0=",
+        "ref": "refs/heads/dev-v0.10.0",
+        "rev": "7f78d257afee773bd828c36c442df012309383f3",
+        "revCount": 13201,
+        "type": "git",
+        "url": "ssh://git@github.com/Foundation-Devices/KeyOS"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@github.com/Foundation-Devices/KeyOS"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1756542300,
+        "narHash": "sha256-tlOn88coG5fzdyqz6R93SQL5Gpq+m/DsWpekNFhqPQk=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "d7600c775f877cd87b4f5a831c28aa94137377aa",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1757347588,
+        "narHash": "sha256-tLdkkC6XnsY9EOZW9TlpesTclELy8W7lL2ClL+nma8o=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "b599843bad24621dcaa5ab60dac98f9b0eb1cabe",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "keyos": "keyos",
+        "nixpkgs": "nixpkgs_2",
+        "updiff": "updiff"
+      }
+    },
+    "rust-analyzer-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1756597274,
+        "narHash": "sha256-wfaKRKsEVQDB7pQtAt04vRgFphkVscGRpSx3wG1l50E=",
+        "owner": "rust-lang",
+        "repo": "rust-analyzer",
+        "rev": "21614ed2d3279a9aa1f15c88d293e65a98991b30",
+        "type": "github"
+      },
+      "original": {
+        "owner": "rust-lang",
+        "ref": "nightly",
+        "repo": "rust-analyzer",
+        "type": "github"
+      }
+    },
+    "updiff": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1756491464,
+        "narHash": "sha256-toCfVX6S/KO6ECu1yZ39N2ojdTV4I3PyIkrI5PkL2ZE=",
+        "ref": "refs/heads/main",
+        "rev": "c3a83b867ed4203afaf149f225c2a1f7e75b8472",
+        "revCount": 10,
+        "type": "git",
+        "url": "ssh://git@github.com/Foundation-Devices/updiff"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@github.com/Foundation-Devices/updiff"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
