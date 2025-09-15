@@ -131,8 +131,6 @@ KEYOS_DIR=${3:-../keyos}
 
 START_DIR=$(pwd)
 
-info "checking required directories and tools"
-
 if [ ! -d "$OLD_VERSION_DIR" ]; then
     error "directory '$OLD_VERSION_DIR' does not exist."
     exit 1
