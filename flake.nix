@@ -28,6 +28,7 @@
         };
         # using build shell bc faster than full dev shell
         keyosShell = keyos.devShells.${system}.build;
+        keyosPackages = keyos.packages.${system};
 
         updiffPkg = pkgs.rustPlatform.buildRustPackage {
           pname = "updiff";
@@ -36,11 +37,16 @@
           cargoLock.lockFile = "${updiff}/Cargo.lock";
         };
 
-        customPackages = with pkgs; [
-          updiffPkg
-          bzip2
-          gnutar
-        ];
+        customPackages =
+          (with pkgs; [
+            updiffPkg
+            bzip2
+            gnutar
+          ])
+          ++ (with keyosPackages; [
+            # for local dev
+            rust-analyzer
+          ]);
       in {
         default = keyosShell.overrideAttrs (keyos: {
           nativeBuildInputs = keyos.nativeBuildInputs ++ customPackages;
