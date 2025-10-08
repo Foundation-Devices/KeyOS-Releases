@@ -37,12 +37,15 @@ pub struct Args {
     pub new_version: String,
     /// Path to the new directory.
     pub new: PathBuf,
-    /// Path to the new directory.
+    /// Release label.
     #[arg(long, default_value = "KeyOS Release")]
     pub label: String,
-    /// Path to the new directory.
+    /// Flag indicating whether this release is mandatory.
     #[arg(long)]
     pub mandatory: bool,
+    /// Flag indicating whether a reboot is required after this release.
+    #[arg(long)]
+    pub reboot_required: bool,
     /// Path where the release tar (output of `release-gen`) should be created.
     /// The directory does not need to exist, it will be created if missing.
     ///
@@ -128,6 +131,8 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
         })
         .collect();
 
+    println!("[INFO] collecting actions for release");
+
     let mut actions = vec![];
 
     for base_file in &base_src_files {
@@ -206,9 +211,12 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
         }
     }
 
+    println!("[INFO] creating release manifest");
+
     let manifest = ReleaseManifest {
         label: args.label.clone(),
         mandatory: args.mandatory,
+        reboot_required: args.reboot_required,
         date: chrono::Utc::now().date_naive().to_string(),
         transactions: vec![Transaction::new(actions)],
     };
@@ -223,8 +231,10 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
 
     manifest_file.sync_all()?;
 
+    println!("[INFO] creating release tar");
+
     let tar_cmd = std::process::Command::new("tar")
-        .args(&[
+        .args([
             "-cf",
             args.out.to_str().unwrap(),
             "-C",
@@ -241,6 +251,8 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
             String::from_utf8_lossy(&tar_cmd.stderr)
         ));
     }
+
+    println!("[INFO] done");
 
     Ok(())
 }
