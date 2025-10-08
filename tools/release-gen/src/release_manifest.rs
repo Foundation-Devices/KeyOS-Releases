@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct ReleaseManifest {
     pub label: String,
     pub mandatory: bool,
+    pub reboot_required: bool,
     pub date: String,
     pub transactions: Vec<Transaction>,
 }
