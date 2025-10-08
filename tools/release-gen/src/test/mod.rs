@@ -40,6 +40,7 @@ fn release_roundtrip() {
         new: new_dir.clone(),
         label: String::from("test label"),
         mandatory: true,
+        reboot_required: false,
         out: out_path.clone(),
         updiff_path,
     };
