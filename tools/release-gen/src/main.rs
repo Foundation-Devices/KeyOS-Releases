@@ -1,6 +1,8 @@
 #[cfg(not(test))]
-use std::io::Seek;
-
+use {
+    aho_corasick::AhoCorasick,
+    std::{ffi, io::Seek},
+};
 use {
     anyhow::Context,
     clap::Parser,
@@ -18,9 +20,11 @@ mod release_manifest;
 #[cfg(test)]
 mod test;
 
-const PATH_TO_STR_ERROR: &str = "Path should be a valid string";
 #[cfg(not(test))]
-const COSIGN2_DEFAULT_HEADER_SIZE: u64 = 2048;
+const APP_IMAGE: &str = "app.bin";
+#[cfg(not(test))]
+const COSIGN2_DEFAULT_HEADER_SIZE: usize = 2048;
+const PATH_TO_STR_ERROR: &str = "Path should be a valid string";
 
 /// `release-gen` traverses the two directories and crates a `release.tar` file
 /// that contains the manifest describing what actions to perform to reach the
@@ -144,6 +148,21 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
             let base_file_full = args.base.clone().join(base_file);
             let new_file_full = args.new.clone().join(base_file);
 
+            #[cfg(not(test))]
+            let is_app_image = base_file_full.file_name().expect("file should have a name")
+                == ffi::OsStr::new(APP_IMAGE);
+            #[cfg(not(test))]
+            if is_app_image
+                && should_demand_reboot(&base_file_full, &new_file_full)?
+                && !args.reboot_required
+            {
+                println!(
+                    "[WARN] this release will likely require a reboot to be applied correctly, \
+                     but the `--reboot-required` flag was not set. Please consider setting it and \
+                     regenerating the release."
+                );
+            }
+
             if !files_have_same_content(&base_file_full, &new_file_full)? {
                 let patch_file = out_patch_dir.clone().join(base_file);
                 let patch_file_parent = patch_file
@@ -255,6 +274,141 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
     println!("[INFO] done");
 
     Ok(())
+}
+
+#[cfg(not(test))]
+fn should_demand_reboot(base_image_path: &Path, new_image_path: &Path) -> anyhow::Result<bool> {
+    let base_update_server_hash = program_elf_hash(base_image_path, "update")?
+        .expect("Update server should exist in base image");
+    let new_update_server_hash = program_elf_hash(new_image_path, "update")?
+        .expect("Update server should exist in new image");
+
+    Ok(base_update_server_hash != new_update_server_hash)
+}
+
+#[cfg(not(test))]
+fn program_elf_hash(
+    image_path: &Path,
+    target_program_name: &str,
+) -> anyhow::Result<Option<blake3::Hash>> {
+    let mut image = File::open(image_path)
+        .with_context(|| format!("Opening file: {}", abs_path(image_path)))?;
+
+    // Find the start positions of all binary elf tags in the image. These tags have
+    // the following format:
+    //
+    // +------------+-----------+----------------+---------------------------+
+    // | Magic      | CRC16     | Size (words)   |     BinaryElfTag          |
+    // +------------+-----------+----------------+---------------------------+
+    // | b"BElf"    | digest    | len/4 (u16)    | BinaryElfTag::TOTAL_SIZE  |
+    // | (4 bytes)  | (2 bytes) | (2 bytes)      | (variable size)           |
+    // +------------+-----------+----------------+---------------------------+
+    let mut belf_tag_start_positions = Vec::new();
+    let ac = AhoCorasick::new([b"BElf"]).context("Creating Aho-Corasick automaton")?;
+    for ac_match in ac.stream_find_iter(&image) {
+        let ac_match = ac_match.context("Aho-Corasick match error")?;
+        belf_tag_start_positions.push(ac_match.start());
+    }
+
+    // Search for the binary ELF that has the required program name.
+    for start_pos in belf_tag_start_positions {
+        image.seek(io::SeekFrom::Start(start_pos as u64))?;
+        let magic = {
+            let mut buf = [0u8; 4];
+            image.read_exact(&mut buf).context("Reading BElf magic")?;
+            buf
+        };
+        assert_eq!(&magic, b"BElf", "Invalid BElf magic");
+        let _crc = {
+            let mut buf = [0u8; 2];
+            image.read_exact(&mut buf).context("Reading BElf CRC16")?;
+            u16::from_le_bytes(buf)
+        };
+        let belf_size = {
+            let mut buf = [0u8; 2];
+            image.read_exact(&mut buf).context("Reading BElf size")?;
+            u16::from_le_bytes(buf) as usize * 4
+        };
+        let belf_bytes = {
+            let mut buf = vec![0u8; belf_size];
+            image.read_exact(&mut buf).context("Reading BElf bytes")?;
+            buf
+        };
+        let belf = BinaryElfTag::from_bytes(&belf_bytes).context("Parsing BinaryElf from bytes")?;
+
+        let belf_name = belf
+            .program_name
+            .iter()
+            .cloned()
+            .take_while(|&b| b != 0)
+            .chain(std::iter::once(0))
+            .collect::<Vec<u8>>();
+        let Ok(prog_name) = ffi::CStr::from_bytes_with_nul(&belf_name)
+            .context("Creating program name CStr")?
+            .to_str()
+        else {
+            // Probably a false positive, skip.
+            continue;
+        };
+        if prog_name == target_program_name {
+            // All ELF files should have a cosign2 header at the start.
+            let elf_start = belf.load_offset + COSIGN2_DEFAULT_HEADER_SIZE as u32;
+            image
+                .seek(io::SeekFrom::Start(elf_start as u64))
+                .context("Seeking to BElf data")?;
+
+            let mut buf = vec![0u8; belf.data_len as usize - COSIGN2_DEFAULT_HEADER_SIZE];
+            image.read_exact(&mut buf).context("Reading BElf data")?;
+            let hash = blake3::hash(&buf);
+
+            return Ok(Some(hash));
+        }
+    }
+
+    Ok(None)
+}
+
+#[cfg(not(test))]
+struct BinaryElfTag {
+    load_offset: u32,
+    data_len: u32,
+    _app_id: [u8; Self::APP_ID_SIZE],
+    program_name: [u8; Self::PROGRAM_NAME_SIZE],
+}
+
+#[cfg(not(test))]
+impl BinaryElfTag {
+    const APP_ID_SIZE: usize = 16;
+    const PROGRAM_NAME_SIZE: usize = 32;
+    const TOTAL_SIZE: usize = 4 + 4 + Self::APP_ID_SIZE + Self::PROGRAM_NAME_SIZE;
+
+    fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+        if bytes.len() != Self::TOTAL_SIZE {
+            anyhow::bail!(
+                "BinaryElfTag bytes length incorrect: expected {}, got {}",
+                Self::TOTAL_SIZE,
+                bytes.len()
+            );
+        }
+
+        let load_offset = u32::from_le_bytes(bytes[..4].try_into().unwrap());
+        let data_len = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+
+        let mut app_id = [0u8; Self::APP_ID_SIZE];
+        app_id.copy_from_slice(&bytes[8..8 + Self::APP_ID_SIZE]);
+
+        let mut program_name = [0u8; Self::PROGRAM_NAME_SIZE];
+        program_name.copy_from_slice(
+            &bytes[8 + Self::APP_ID_SIZE..8 + Self::APP_ID_SIZE + Self::PROGRAM_NAME_SIZE],
+        );
+
+        Ok(Self {
+            load_offset,
+            data_len,
+            _app_id: app_id,
+            program_name,
+        })
+    }
 }
 
 struct FileCleanupGuard<'a> {
