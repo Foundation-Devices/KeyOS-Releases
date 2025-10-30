@@ -42,6 +42,7 @@
             updiffPkg
             bzip2
             gnutar
+            gzip
           ])
           ++ (with keyosPackages; [
             # for local dev
