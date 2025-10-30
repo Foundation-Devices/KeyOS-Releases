@@ -9,6 +9,12 @@ sign VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"
     VER="{{VERSION}}"
     CFG="{{CONFIG_PATH}}"
 
+    # Expand ~ in config path if present
+    if [[ "$CFG" == "~/"* ]]; then
+        CFG="$HOME/${CFG#~/}"
+    fi
+
+
     # Ensure we are on the correct branch
     if ! git rev-parse --verify "$VER" >/dev/null 2>&1; then
         echo "ERROR: Branch '$VER' not found" >&2
@@ -37,9 +43,9 @@ sign VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"
 
     # Determine commit message based on signature state after signing
     if cargo run --manifest-path tools/signer/Cargo.toml -- validate "$VER" --files-only >/dev/null 2>&1; then
-        MSG="Second signatures applied"
+        MSG="Second signatures applied and pushed"
     else
-        MSG="First signatures applied"
+        MSG="First signatures applied and pushed"
     fi
 
     # Stage and commit only the release folder changes
