@@ -206,6 +206,9 @@ cd "$START_DIR"
 # Then copy the image over.
 cp "$KEYOS_DIR/boot.img" "boot-$OLD_VERSION-$NEW_VERSION.img"
 
+info "compressing 'boot.img'"
+gzip -c "boot-$OLD_VERSION-$NEW_VERSION.img" > "boot-$OLD_VERSION-$NEW_VERSION.img.gz"
+
 mv release.tar "release-$OLD_VERSION-$NEW_VERSION.tar"
 
 info "done"
