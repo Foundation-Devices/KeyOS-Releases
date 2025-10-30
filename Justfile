@@ -3,13 +3,61 @@
 
 # Sign individual files with the provided key
 sign VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
-    @echo "Signing all files for version {{VERSION}} with config {{CONFIG_PATH}}"
-    cargo run --manifest-path tools/signer/Cargo.toml -- sign-files {{VERSION}} {{CONFIG_PATH}}
+    #!/usr/bin/env bash
+    set -euo pipefail
 
-# Sign individual files with the provided key
-sign-dev VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
-    @echo "Signing all files for version {{VERSION}} with config {{CONFIG_PATH}}"
-    cargo run --manifest-path tools/signer/Cargo.toml -- sign-files --developer {{VERSION}} {{CONFIG_PATH}}
+    VER="{{VERSION}}"
+    CFG="{{CONFIG_PATH}}"
+
+    # Ensure we are on the correct branch
+    if ! git rev-parse --verify "$VER" >/dev/null 2>&1; then
+        echo "ERROR: Branch '$VER' not found" >&2
+        exit 1
+    fi
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    if [ "$CURRENT_BRANCH" != "$VER" ]; then
+        git checkout "$VER"
+    fi
+    git pull --rebase
+
+    REL_DIR="$VER"
+    if [ ! -d "$REL_DIR" ]; then
+        echo "ERROR: Release directory not found: $REL_DIR" >&2
+        exit 1
+    fi
+
+    # Abort if already double-signed
+    if cargo run --manifest-path tools/signer/Cargo.toml -- validate "$VER" --files-only >/dev/null 2>&1; then
+        echo "ERROR: Files are already double-signed for version $VER" >&2
+        exit 1
+    fi
+
+    echo "Signing all files for version $VER with config $CFG"
+    cargo run --manifest-path tools/signer/Cargo.toml -- sign-files "$VER" "$CFG"
+
+    # Determine commit message based on signature state after signing
+    if cargo run --manifest-path tools/signer/Cargo.toml -- validate "$VER" --files-only >/dev/null 2>&1; then
+        MSG="Second signatures applied"
+    else
+        MSG="First signatures applied"
+    fi
+
+    # Stage and commit only the release folder changes
+    git -C "$REL_DIR" add -A .
+    if git -C "$REL_DIR" diff --cached --quiet -- .; then
+        echo "No changes detected in $REL_DIR; aborting commit." >&2
+        exit 1
+    fi
+
+    git commit -m "$MSG"
+    # Push to upstream or set it if missing
+    if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+        git push
+    else
+        git push -u origin "$VER"
+    fi
+
+    echo "✅ $MSG"
 
 # Create tar file (only when all files have two signatures)
 create-tar VERSION:
@@ -35,9 +83,9 @@ unsign VERSION:
     @echo "Resetting KeyOS image..."
     git checkout -- {{VERSION}}/app.bin
     @echo "Resetting app files..."
-    git checkout -- {{VERSION}}/apps/*.elf
+    git checkout -- {{VERSION}}/apps/*/app.elf
     @echo "Removing tar file if it exists..."
-    rm -f {{VERSION}}/KeyOS-v{{VERSION}}.tar
+    rm -f {{VERSION}}/KeyOS-v{{VERSION}}.bin
     @echo "Removing manifest file if it exists..."
     rm -f {{VERSION}}/manifest.json
     @echo "✓ All files have been reset to their unsigned state"
