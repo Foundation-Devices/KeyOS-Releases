@@ -180,13 +180,40 @@ release-gen *args:
 
 # Create a bootable disk image from firmware components (production)
 create-image VERSION OUTPUT="boot.img":
-    @echo "Creating disk image for version {{VERSION}}"
-    cargo run --manifest-path tools/image-builder/Cargo.toml -- --production create-image {{VERSION}} --output {{OUTPUT}}
+    #!/usr/bin/env bash
+    set -euo pipefail
 
-# Create a bootable disk image from firmware components (production)
+    VER="{{VERSION}}"
+    ROOT="{{justfile_directory()}}"
+    WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
+    WT="$WORKTREES_DIR/$VER"
+
+    # Determine the folder that contains the version's files
+    VERSION_FOLDER="$VER"
+    if [ -d "$WT/$VER" ]; then
+        VERSION_FOLDER="$WT/$VER"
+    fi
+
+    echo "Creating disk image for version $VER (folder: $VERSION_FOLDER)"
+    cargo run --manifest-path "$ROOT/tools/image-builder/Cargo.toml" -- --production create-image "$VERSION_FOLDER" --output "{{OUTPUT}}"
+
+# Create a bootable disk image from firmware components (development)
 create-image-dev VERSION OUTPUT="boot.img":
-    @echo "Creating disk image for version {{VERSION}}"
-    cargo run --manifest-path tools/image-builder/Cargo.toml -- create-image {{VERSION}} --output {{OUTPUT}}
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    VER="{{VERSION}}"
+    ROOT="{{justfile_directory()}}"
+    WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
+    WT="$WORKTREES_DIR/$VER"
+
+    VERSION_FOLDER="$VER"
+    if [ -d "$WT/$VER" ]; then
+        VERSION_FOLDER="$WT/$VER"
+    fi
+
+    echo "Creating disk image for version $VER (folder: $VERSION_FOLDER)"
+    cargo run --manifest-path "$ROOT/tools/image-builder/Cargo.toml" -- create-image "$VERSION_FOLDER" --output "{{OUTPUT}}"
 
 # Print SHA256 hashes of firmware components
 print-hashes VERSION:
@@ -237,3 +264,167 @@ finalize VERSION:
     (cd "$WT" && just -f "$ROOT/Justfile" create-recovery-tar "$VER")
 
     echo "✅ Finalize complete for version $VER"
+
+
+# Sign bootloader (boot.bin) with Atmel/Microchip SAM-BA cipher using provided secrets directory
+# Usage: just sign-bl 1.0.0 ~/secrets
+# Requires: SECURE_SAMBA_CIPHER_PATH env var pointing to secure-sam-ba-cipher.py
+# Optional: SECURE_SAMBA_PYTHON to choose interpreter; otherwise auto-detects venv near the tool or falls back to python3
+sign-bl VERSION SECRETS_DIR:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    VER="{{VERSION}}"
+    SEC_DIR_RAW="{{SECRETS_DIR}}"
+    ROOT="{{justfile_directory()}}"
+    WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
+    WT="$WORKTREES_DIR/$VER"
+
+    # Expand ~ in secrets dir path if present
+    SEC_DIR="$SEC_DIR_RAW"
+    if [[ "$SEC_DIR" == "~/"* ]]; then
+        SEC_DIR="$HOME/${SEC_DIR#~/}"
+    fi
+
+    # Locate secure-sam-ba-cipher script from env var and expand ~
+    if [ -z "${SECURE_SAMBA_CIPHER_PATH:-}" ]; then
+        echo "ERROR: SECURE_SAMBA_CIPHER_PATH is not set. Set it to the path of secure-sam-ba-cipher.py" >&2
+        exit 1
+    fi
+    SAMBA="$SECURE_SAMBA_CIPHER_PATH"
+    if [[ "$SAMBA" == "~/"* ]]; then
+        SAMBA="$HOME/${SAMBA#~/}"
+    fi
+    if [ ! -f "$SAMBA" ]; then
+        echo "ERROR: secure-sam-ba-cipher.py not found at: $SAMBA" >&2
+        exit 1
+    fi
+
+    # Determine Python interpreter for SAM-BA tool
+    if [ -n "${SECURE_SAMBA_PYTHON:-}" ]; then
+        PY="$SECURE_SAMBA_PYTHON"
+        if [[ "$PY" == "~/"* ]]; then
+            PY="$HOME/${PY#~/}"
+        fi
+        if [ ! -x "$PY" ]; then
+            echo "ERROR: SECURE_SAMBA_PYTHON is set but not executable: $PY" >&2
+            exit 1
+        fi
+    else
+        SAMBA_DIR="$(cd "$(dirname "$SAMBA")" && pwd)"
+        PY=""
+        if [ -x "$SAMBA_DIR/venv/bin/python" ]; then
+            PY="$SAMBA_DIR/venv/bin/python"
+        elif [ -x "$SAMBA_DIR/.venv/bin/python" ]; then
+            PY="$SAMBA_DIR/.venv/bin/python"
+        else
+            PY="$(command -v python3 || true)"
+        fi
+        if [ -z "$PY" ]; then
+            echo "ERROR: Could not locate a Python interpreter. Set SECURE_SAMBA_PYTHON or ensure python3 is available." >&2
+            exit 1
+        fi
+    fi
+    echo "Using Python interpreter: $PY"
+
+
+    if [ ! -d "$SEC_DIR" ]; then
+        echo "ERROR: Secrets directory not found: $SEC_DIR" >&2
+        exit 1
+    fi
+
+    ACT="$SEC_DIR/sam-ba-license-activation.txt"
+    CUST="$SEC_DIR/cust.key"
+
+    for f in "$ACT" "$CUST"; do
+        if [ ! -f "$f" ]; then
+            echo "ERROR: Missing required secrets file: $f" >&2
+            exit 1
+        fi
+    done
+
+    # Ensure the release branch exists locally
+    if ! git -C "$ROOT" rev-parse --verify "$VER" >/dev/null 2>&1; then
+        echo "ERROR: Branch '$VER' not found" >&2
+        exit 1
+    fi
+
+    # Prepare/update a dedicated worktree for this version
+    mkdir -p "$WORKTREES_DIR"
+    git -C "$ROOT" fetch --all --prune
+    if git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        :
+    elif [ -e "$WT" ]; then
+        echo "ERROR: Worktree path exists but is not a git worktree: $WT" >&2
+        exit 1
+    else
+        git -C "$ROOT" worktree add "$WT" "$VER"
+    fi
+    git -C "$WT" pull --rebase || true
+
+    # Verify the release directory exists and boot.bin is present
+    if [ ! -d "$WT/$VER" ]; then
+        echo "ERROR: Release directory not found: $WT/$VER" >&2
+        exit 1
+    fi
+
+    BOOT_IN="$WT/$VER/boot.bin"
+    if [ ! -f "$BOOT_IN" ]; then
+        echo "ERROR: boot.bin not found in $WT/$VER" >&2
+        exit 1
+    fi
+
+    echo "Signing bootloader for version $VER using secrets at $SEC_DIR"
+    echo "Working directory: $WT/$VER"
+    echo "SAM-BA tool: $SAMBA"
+    echo "Python interpreter: $PY"
+    "$PY" -V 2>&1 || true
+
+    # Quick, non-secret file size checks
+    echo "Input file sizes (bytes):"
+    wc -c "$BOOT_IN" "$CUST" "$PRIV" "$ACT" 2>/dev/null || true
+
+    # Build exact command as an array for reliability
+    CMD=("$PY" "$SAMBA" bootstrap -d sama5d2x -l "$ACT" -k "$CUST" -i "$BOOT_IN" -o boot.cip)
+
+    # Print an exact, copy/pastable command line the user can run manually
+    printf 'Manual repro:\n  cd %q && ' "$WT/$VER"
+    printf '%q ' "${CMD[@]}"
+    echo
+
+    # Ensure unbuffered Python so logs are flushed immediately
+    export PYTHONUNBUFFERED=1
+
+    # Execute the command with tee to capture a log file, preserving original exit code
+    status=0
+    (
+      cd "$WT/$VER"
+      ( "${CMD[@]}" ) 2>&1 | tee samba.log
+      exit "${PIPESTATUS[0]}"
+    ) || status=$?
+    echo "Command exit code: $status"
+    if [ "$status" -ne 0 ]; then
+        echo "---- Last 50 lines of $WT/$VER/samba.log ----"
+        tail -n 50 "$WT/$VER/samba.log" || true
+        echo "--------------------------------------------"
+        exit "$status"
+    fi
+
+    # Normalize device-specific output (e.g., boot_sama5d2x.cip) to boot.cip
+    if [ ! -f "$WT/$VER/boot.cip" ]; then
+        if [ -f "$WT/$VER/boot_sama5d2x.cip" ]; then
+            mv -f "$WT/$VER/boot_sama5d2x.cip" "$WT/$VER/boot.cip"
+        else
+            CAND="$(ls -1 "$WT/$VER"/boot_*.cip 2>/dev/null | head -n1 || true)"
+            if [ -n "$CAND" ]; then
+                mv -f "$CAND" "$WT/$VER/boot.cip"
+            fi
+        fi
+    fi
+    if [ -f "$WT/$VER/boot.cip" ]; then
+        echo "✅ boot.cip created: $WT/$VER/boot.cip"
+    else
+        echo "ERROR: boot.cip was not created" >&2
+        ls -l "$WT/$VER"/*.cip 2>/dev/null || true
+        exit 1
+    fi
