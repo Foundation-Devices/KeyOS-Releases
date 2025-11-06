@@ -142,8 +142,6 @@ fn main() -> Result<()> {
             version,
             files_only,
         } => {
-            let version_folder = normalize_version(version)?;
-        Commands::Validate { version } => {
             let version_folder = version.clone();
             let firmware_version = strip_v_prefix(version);
             validate(&version_folder, &firmware_version, *files_only)?;
