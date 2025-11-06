@@ -1,15 +1,1 @@
-{
-  "appName": {
-    "en": "Settings"
-  },
-  "appDescription": {},
-  "appId": "0xc192b79230473875f159d4423d74d00f",
-  "appSignature": "0x00",
-  "servers": [],
-  "permissions": [
-    {
-      "server": "os/gui-server",
-      "messages": "0..128"
-    }
-  ]
-}
+{"appName":{"en":"Settings"},"appId":"0xc192b79230473875f159d4423d74d00f","servers":{},"permissions":{"os/security":["GetDeviceId","GetOsVersionInfo","ChangePin","FactoryReset"],"os/backup":["StatusSubscribe"],"os/power-manager":["SetOtgPriority","GetExtendedStatus","GetStatus","Reboot"],"os/settings":["SetUseStandardTimeFormat","SetEnvoyTimeSync","GetShowSecurityWords","SubscribeScreenBrightness","SetScreenBrightness","SetSystemTheme","SetTimeZone","SetPinEntryMode","GetDebugTouch","SubscribeDebugTouch","SetAutoLock","GetUseStandardTimeFormat","SetDeviceName","GetDeviceName","GetEnvoyTimeSync","SubscribeSystemTheme","SetShowSecurityWords","GetAutoLock","GetSystemTheme","GetPinEntryMode","GetTimeZone"],"os/gui-server":["RequestRedraw","ShowModal","AnimateNextFrame","RegisterAppMessage","SwapBuffers","HideKeyboard","SwitchToLauncher","UpdateKeyboard"],"os/fs":["SubscribeFilesystemEvent","Rename","MapFileMessage","NextEntry","CreateDirMessage","TruncateFile","CloseFile","OpenFileMessage","CloseDir","WriteFile","SetLen","GetMetadata","FlushFs","Remove","GetUserReadAccess","SeekFile","ReadFile","Flush","OpenDirMessage","CopyTo"],"os/bt":["GetBleVersionInfo"]},"memory":[],"syscall":[]}
