@@ -2,3 +2,17 @@
 target/
 cosign2.toml
 .idea
+
+tools/image-builder/target/debug/
+
+tools/manifest-gen/target/debug/
+
+tools/image-builder/target/.rustc_info.json
+
+tools/manifest-gen/target/.rustc_info.json
+
+tools/manifest-gen/target/CACHEDIR.TAG
+
+
+# Local worktrees created by `just sign`/`just unsign`
+/.worktrees/

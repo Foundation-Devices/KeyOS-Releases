@@ -19,7 +19,7 @@
 #
 # Usage
 #
-# > make_release.sh <old_version_dir> <new_version_dir> <path_to_cosign2_config> [<path_to_keyos_repo>]
+# > make_release.sh <old_version_dir> <new_version_dir> <path_to_cosign2_config> [<path_to_keyos_repo>] [--reboot-required]
 #
 # For simplicity, name the two input directories something like:
 #
@@ -87,10 +87,10 @@ if [ ! -d .git ] || [ ! -f .git/config ] || ! grep -q "Foundation-Devices/KeyOS-
     exit 1
 fi
 
-if [ "$#" -ne 3 ] && [ "$#" -ne 4 ]; then
+if [ "$#" -lt 3 ] || [ "$#" -gt 5 ]; then
     echo "invalid number of arguments
 
-Usage: make_release.sh <old_version_dir> <new_version_dir> <path_to_cosign2_config> [<path_to_keyos_repo>]"
+Usage: make_release.sh <old_version_dir> <new_version_dir> <path_to_cosign2_config> [<path_to_keyos_repo>] [--reboot-required]"
     exit 1
 fi
 
@@ -98,6 +98,14 @@ OLD_VERSION_DIR=$1
 NEW_VERSION_DIR=$2
 COSIGN2_CONFIG=$3
 KEYOS_DIR=${4:-../keyos}
+REBOOT_REQUIRED=false
+
+if [ "$#" -ge 5 ] && [ "$5" = "--reboot-required" ]; then
+    REBOOT_REQUIRED=true
+elif [ "$#" -ge 4 ] && [ "$4" = "--reboot-required" ]; then
+    REBOOT_REQUIRED=true
+    KEYOS_DIR=../keyos
+fi
 
 START_DIR=$(pwd)
 
@@ -138,30 +146,55 @@ OLD_VERSION=${OLD_VERSION_DIR##*/}
 NEW_VERSION=${NEW_VERSION_DIR##*/}
 
 # Strip the 'v'.
+OLD_VERSION_NO_V=${OLD_VERSION#v}
 NEW_VERSION_NO_V=${NEW_VERSION#v}
 
 info "signing files"
 
 # Run the `signer` tool to sign both versions.
-cargo run --release -p signer -- sign-files "$OLD_VERSION" "$COSIGN2_CONFIG" --developer || exit 1
-cargo run --release -p signer -- sign-files "$NEW_VERSION" "$COSIGN2_CONFIG" --developer || exit 1
+cargo run --release -p signer -- sign-files "$OLD_VERSION" "$COSIGN2_CONFIG" --developer || true
+cargo run --release -p signer -- sign-files "$NEW_VERSION" "$COSIGN2_CONFIG" --developer || true
 
 info "creating release tarball"
 
 # Run `release-gen` to create the release tarball.
-cargo run --release -p release-gen -- "$OLD_VERSION" "$OLD_VERSION_DIR" "$NEW_VERSION" "$NEW_VERSION_DIR" -o ./release.tar
+RELEASE_GEN_ARGS=("$OLD_VERSION" "$OLD_VERSION_DIR" "$NEW_VERSION" "$NEW_VERSION_DIR" -o ./release.tar)
+if [ "$REBOOT_REQUIRED" = true ]; then
+    RELEASE_GEN_ARGS+=(--reboot-required)
+fi
+cargo run --release -p release-gen -- "${RELEASE_GEN_ARGS[@]}"
+
+info "calculating tar file hash before signing"
+UNSIGNED_SHA256=$(sha256sum ./release.tar | awk '{print $1}')
 
 info "signing release tarball with 'cosign2'"
 cosign2 sign -c "$COSIGN2_CONFIG" -i ./release.tar --developer --in-place --binary-version "$NEW_VERSION_NO_V"
+
+info "calculating tar file hash after signing"
+SIGNED_SHA256=$(sha256sum ./release.tar | awk '{print $1}')
+
+info "generating @manifest.json"
+RELEASE_DATE=$(date +%Y-%m-%d)
+UPDATE_FILENAME="release-${OLD_VERSION}-${NEW_VERSION}.tar"
+SIGNATURE_FILENAME="release-${OLD_VERSION}-${NEW_VERSION}.tar.sig"
+
+cat > "manifest-${OLD_VERSION}-${NEW_VERSION}.json" <<EOF
+{
+	"baseVersion": "${OLD_VERSION_NO_V}",
+	"version": "${NEW_VERSION_NO_V}",
+	"signedSha256": "${SIGNED_SHA256}",
+	"unsignedSha256": "${UNSIGNED_SHA256}",
+	"updateFilename": "${UPDATE_FILENAME}",
+	"signatureFilename": "${SIGNATURE_FILENAME}",
+	"releaseDate": "${RELEASE_DATE}"
+}
+EOF
 
 info "creating 'boot.img'"
 
 # Restore old files and combine them into the image.
 cp "$OLD_VERSION_DIR/app.bin" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images"
 cp -r "$OLD_VERSION_DIR/apps" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release"
-
-# Temporarily copy this into `keyos` to include it in `boot.img`.
-cp release.tar "$KEYOS_DIR/release.tar"
 
 cd "$KEYOS_DIR"
 
@@ -170,10 +203,12 @@ cargo xtask build-firmware-image
 
 cd "$START_DIR"
 
-# Clean up the temporary copy.
-rm -f "$KEYOS_DIR/release.tar"
-
 # Then copy the image over.
-cp "$KEYOS_DIR/boot.img" .
+cp "$KEYOS_DIR/boot.img" "boot-$OLD_VERSION-$NEW_VERSION.img"
+
+info "compressing 'boot.img'"
+gzip -c "boot-$OLD_VERSION-$NEW_VERSION.img" > "boot-$OLD_VERSION-$NEW_VERSION.img.gz"
+
+mv release.tar "release-$OLD_VERSION-$NEW_VERSION.tar"
 
 info "done"
