@@ -1,15 +1,1 @@
-{
-  "appName": {
-    "en": "Image Viewer"
-  },
-  "appDescription": {},
-  "appId": "0x0944ad38232eab9a060661c2e8dc7eb5",
-  "appSignature": "0x00",
-  "servers": [],
-  "permissions": [
-    {
-      "server": "os/gui-server",
-      "messages": "0..128"
-    }
-  ]
-}
+{"appName":{"en":"Image Viewer"},"appId":"0x0944ad38232eab9a060661c2e8dc7eb5","servers":{},"permissions":{"os/gui-server":["RegisterAppMessage","ShowModal","RequestRedraw","UpdateKeyboard","SwapBuffers","AnimateNextFrame","HideKeyboard"],"os/settings":["GetSystemTheme","SubscribeSystemTheme","GetDebugTouch","SubscribeDebugTouch"],"os/fs":["Rename","WriteFile","GetAirlockReadAccess","NextEntry","OpenFileMessage","OpenDirMessage","SeekFile","Flush","GetUserReadAccess","TruncateFile","CopyTo","SubscribeFilesystemEvent","CreateDirMessage","ReadFile","GetUsbReadAccess","Remove","CloseDir","SetLen","FlushFs","CloseFile","GetMetadata","MapFileMessage"]},"memory":[],"syscall":[]}

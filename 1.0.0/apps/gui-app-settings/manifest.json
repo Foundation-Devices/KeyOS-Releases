@@ -1,15 +1,1 @@
-{
-  "appName": {
-    "en": "Settings"
-  },
-  "appDescription": {},
-  "appId": "0xc192b79230473875f159d4423d74d00f",
-  "appSignature": "0x00",
-  "servers": [],
-  "permissions": [
-    {
-      "server": "os/gui-server",
-      "messages": "0..128"
-    }
-  ]
-}
+{"appName":{"en":"Settings"},"appId":"0xc192b79230473875f159d4423d74d00f","servers":{},"permissions":{"os/power-manager":["GetStatus","GetExtendedStatus","Reboot","SetOtgPriority"],"os/fs":["OpenFileMessage","ReadFile","Flush","SetLen","FlushFs","Remove","Rename","CreateDirMessage","CopyTo","SeekFile","WriteFile","CloseFile","SubscribeFilesystemEvent","GetMetadata","TruncateFile","CloseDir","GetUserReadAccess","OpenDirMessage","NextEntry","MapFileMessage"],"os/bt":["GetBleVersionInfo"],"os/backup":["StatusSubscribe"],"os/security":["ChangePin","GetDeviceId","GetOsVersionInfo","FactoryReset"],"os/settings":["SubscribeDebugTouch","SetUseStandardTimeFormat","GetPinEntryMode","SetDeviceName","GetDeviceName","SetPinEntryMode","GetSystemTheme","SubscribeScreenBrightness","GetTimeZone","SubscribeSystemTheme","GetUseStandardTimeFormat","SetAutoLock","GetShowSecurityWords","GetDebugTouch","SetShowSecurityWords","SetScreenBrightness","SetSystemTheme","GetEnvoyTimeSync","GetAutoLock","SetTimeZone","SetEnvoyTimeSync"],"os/gui-server":["SwitchToLauncher","AnimateNextFrame","SwapBuffers","HideKeyboard","RegisterAppMessage","RequestRedraw","UpdateKeyboard","ShowModal"]},"memory":[],"syscall":[]}

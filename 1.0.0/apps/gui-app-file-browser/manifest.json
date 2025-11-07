@@ -1,15 +1,1 @@
-{
-  "appName": {
-    "en": "File Browser"
-  },
-  "appDescription": {},
-  "appId": "0x46696c652042726f7773657200000000",
-  "appSignature": "0x00",
-  "servers": [],
-  "permissions": [
-    {
-      "server": "os/gui-server",
-      "messages": "0..128"
-    }
-  ]
-}
+{"appName":{"en":"File Browser"},"appId":"0x46696c652042726f7773657200000000","servers":{},"permissions":{"os/settings":["GetSystemTheme","GetDebugTouch","SubscribeSystemTheme","SubscribeDebugTouch","SetAirlockMode","SubscribeAirlockMode"],"os/power-manager":["SetOtgPriority"],"os/gui-server":["HideKeyboard","RegisterAppMessage","GetPendingNavRequest","SwapBuffers","FinishResponse","RequestRedraw","AnimateNextFrame","UpdateKeyboard","ShowModal","NavigationCancel"],"os/fs":["GetMetadata","CloseDir","CloseFile","FlushFs","Remove","Rename","SeekFile","WriteFile","MapFileMessage","SubscribeFilesystemEvent","Flush","NextEntry","OpenDirMessage","GetUserReadAccess","ReadFile","GetUsbReadAccess","OpenFileMessage","CreateDirMessage","TruncateFile","CopyTo","GetAirlockReadAccess","SetLen"]},"memory":[],"syscall":[]}
