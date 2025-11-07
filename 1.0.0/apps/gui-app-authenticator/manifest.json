@@ -1,15 +1,1 @@
-{
-  "appName": {
-    "en": "Authenticator"
-  },
-  "appDescription": {},
-  "appId": "0x41757468656e74696361746f72203246",
-  "appSignature": "0x00",
-  "servers": [],
-  "permissions": [
-    {
-      "server": "os/gui-server",
-      "messages": "0..128"
-    }
-  ]
-}
+{"appName":{"en":"Authenticator"},"appId":"0x41757468656e74696361746f72203246","servers":{},"permissions":{"os/settings":["GetSystemTheme","GetDebugTouch","SubscribeDebugTouch","SubscribeSystemTheme"],"os/fs":["CreateDirMessage","GetMetadata","Flush","FlushFs","Rename","WriteFile","ReadFile","SubscribeFilesystemEvent","Remove","OpenDirMessage","TruncateFile","NextEntry","OpenFileMessage","MapFileMessage","SetLen","CopyTo","CloseFile","CloseDir","SeekFile"],"os/gui-server":["SwapBuffers","AnimateNextFrame","RegisterAppMessage","RequestRedraw","ShowModal","HideKeyboard","UpdateKeyboard"]},"memory":[],"syscall":[]}

@@ -1,15 +1,1 @@
-{
-  "appName": {
-    "en": "Settings"
-  },
-  "appDescription": {},
-  "appId": "0xc192b79230473875f159d4423d74d00f",
-  "appSignature": "0x00",
-  "servers": [],
-  "permissions": [
-    {
-      "server": "os/gui-server",
-      "messages": "0..128"
-    }
-  ]
-}
+{"appName":{"en":"Settings"},"appId":"0xc192b79230473875f159d4423d74d00f","servers":{},"permissions":{"os/fs":["SeekFile","Remove","Rename","Flush","CopyTo","GetUserReadAccess","WriteFile","TruncateFile","MapFileMessage","CloseFile","ReadFile","SetLen","GetMetadata","SubscribeFilesystemEvent","OpenDirMessage","OpenFileMessage","CreateDirMessage","FlushFs","NextEntry","CloseDir"],"os/gui-server":["RegisterAppMessage","UpdateKeyboard","ShowModal","SwitchToLauncher","AnimateNextFrame","SwapBuffers","RequestRedraw","HideKeyboard"],"os/settings":["SubscribeDebugTouch","SubscribeScreenBrightness","SetAutoLock","GetEnvoyTimeSync","GetDebugTouch","SetSystemTheme","SetEnvoyTimeSync","GetSystemTheme","GetTimeZone","SetShowSecurityWords","SetUseStandardTimeFormat","SetScreenBrightness","SetPinEntryMode","GetUseStandardTimeFormat","GetDeviceName","SetDeviceName","GetShowSecurityWords","GetPinEntryMode","SubscribeSystemTheme","SetTimeZone","GetAutoLock"],"os/power-manager":["Reboot","GetStatus","SetOtgPriority","GetExtendedStatus"],"os/security":["ChangePin","GetOsVersionInfo","FactoryReset","GetDeviceId"],"os/bt":["GetBleVersionInfo"],"os/backup":["StatusSubscribe"]},"memory":[],"syscall":[]}

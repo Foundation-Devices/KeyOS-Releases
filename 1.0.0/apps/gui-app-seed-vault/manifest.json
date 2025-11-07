@@ -1,15 +1,1 @@
-{
-  "appName": {
-    "en": "Seed Vault"
-  },
-  "appDescription": {},
-  "appId": "0x53656564205661756c74000000000000",
-  "appSignature": "0x00",
-  "servers": [],
-  "permissions": [
-    {
-      "server": "os/gui-server",
-      "messages": "0..128"
-    }
-  ]
-}
+{"appName":{"en":"Seed Vault"},"appId":"0x53656564205661756c74000000000000","servers":{},"permissions":{"os/settings":["GetDebugTouch","GetSystemTheme","SubscribeDebugTouch","SubscribeSystemTheme"],"os/gui-server":["UpdateKeyboard","ShowModal","RegisterAppMessage","HideKeyboard","RequestRedraw","SwapBuffers","AnimateNextFrame"],"os/fs":["NextEntry","Remove","MapFileMessage","CreateDirMessage","Flush","CloseDir","TruncateFile","SetLen","SubscribeFilesystemEvent","WriteFile","ReadFile","Rename","OpenFileMessage","OpenDirMessage","CloseFile","GetMetadata","FlushFs","CopyTo","SeekFile"],"os/security":["GetSeed"]},"memory":[],"syscall":[]}
