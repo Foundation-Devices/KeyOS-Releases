@@ -28,11 +28,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1757443804,
-        "narHash": "sha256-W07gkGPsU1QmhNuwXDN5fv7Wgiwb+IdX/UTsvGP6WE0=",
+        "lastModified": 1760007940,
+        "narHash": "sha256-Y9DWYZCSFCdPmgK9W9SkYrUreAV7+5y8RIzAO7eRhvA=",
         "ref": "refs/heads/dev-v0.10.0",
-        "rev": "7f78d257afee773bd828c36c442df012309383f3",
-        "revCount": 13201,
+        "rev": "522f9548c77de5691eca3bd69ee177209b927f01",
+        "revCount": 13727,
         "type": "git",
         "url": "ssh://git@github.com/Foundation-Devices/KeyOS"
       },
@@ -59,11 +59,11 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1757347588,
-        "narHash": "sha256-tLdkkC6XnsY9EOZW9TlpesTclELy8W7lL2ClL+nma8o=",
+        "lastModified": 1759831965,
+        "narHash": "sha256-vgPm2xjOmKdZ0xKA6yLXPJpjOtQPHfaZDRtH+47XEBo=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "b599843bad24621dcaa5ab60dac98f9b0eb1cabe",
+        "rev": "c9b6fb798541223bbb396d287d16f43520250518",
         "type": "github"
       },
       "original": {
