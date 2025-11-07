@@ -353,14 +353,19 @@ sign-bl VERSION SECRETS_DIR:
     mkdir -p "$WORKTREES_DIR"
     git -C "$ROOT" fetch --all --prune
     if git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        :
+        echo "Updating existing worktree at $WT to origin/$VER..."
+        # Ensure we're on the correct branch name locally
+        git -C "$WT" checkout -B "$VER" || true
     elif [ -e "$WT" ]; then
         echo "ERROR: Worktree path exists but is not a git worktree: $WT" >&2
         exit 1
     else
         git -C "$ROOT" worktree add "$WT" "$VER"
     fi
-    git -C "$WT" pull --rebase || true
+    # Force sync with latest remote state (handles force-pushes)
+    git -C "$WT" fetch --all --prune || true
+    git -C "$WT" reset --hard "origin/$VER"
+    git -C "$WT" clean -fdx
 
     # Verify the release directory exists and boot.bin is present
     if [ ! -d "$WT/$VER" ]; then
