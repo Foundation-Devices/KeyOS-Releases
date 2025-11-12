@@ -1,15 +1,1 @@
-{
-  "appName": {
-    "en": "Bitcoin Wallet"
-  },
-  "appDescription": {},
-  "appId": "0x426974636f696e2057616c6c65740000",
-  "appSignature": "0x00",
-  "servers": [],
-  "permissions": [
-    {
-      "server": "os/gui-server",
-      "messages": "0..128"
-    }
-  ]
-}
+{"appName":{"en":"Bitcoin Wallet"},"appId":"0x426974636f696e2057616c6c65740000","servers":{},"permissions":{"os/gui-server":["UpdateKeyboard","SwapBuffers","HideKeyboard","RequestRedraw","RegisterAppMessage","AnimateNextFrame","ShowModal"],"os/quantum-link":["SendAccountUpdate","PublishPsbt","SubscribeSignPsbt","SubscribeExchangeRate","SubscribeAccountUpdate"],"os/security":["GetOsVersionInfo","GetDeviceId","GetSeed"],"os/settings":["GetSystemTheme","GetDeviceName","SubscribeSystemTheme","GetDebugTouch","SubscribeDebugTouch","GetLocale"],"os/fs":["NextEntry","ReadFile","Flush","GetAirlockReadAccess","OpenFileMessage","FlushFs","MapFileMessage","WriteFile","GetMetadata","Remove","CreateDirMessage","CloseDir","GetAirlockWriteAccess","SetLen","SeekFile","Rename","CopyTo","CloseFile","SubscribeFilesystemEvent","OpenDirMessage","TruncateFile"]},"memory":[],"syscall":[]}
