@@ -178,9 +178,14 @@ fn sign_files(
 
     // Check for required files
     let app_bin = format!("{}/app.bin", version_folder);
+    let recovery_bin = format!("{}/recovery.bin", version_folder);
 
     if !Path::new(&app_bin).exists() {
         return Err(SignerError::FileNotFound(app_bin).into());
+    }
+
+    if !Path::new(&recovery_bin).exists() {
+        return Err(SignerError::FileNotFound(recovery_bin).into());
     }
 
     // Sign app.bin
@@ -194,6 +199,39 @@ fn sign_files(
             "sign",
             "-i",
             &app_bin,
+            "-c",
+            config_path,
+            "--in-place",
+            "--binary-version",
+            firmware_version,
+        ])
+        .output()
+        .context(format!("{} cosign2 error", "✗".red()))?;
+
+    if !output.status.success() {
+        println!("{} Failed to sign", "✗".red());
+        return Err(SignerError::CommandFailed(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        )
+        .into());
+    }
+
+    println!("{}", "✓ Success".green());
+
+    // Sign recovery.bin
+    print!(
+        "Signing recovery image ({})...",
+        Path::new(&recovery_bin)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+    );
+
+    let output = Command::new("cosign2")
+        .args([
+            "sign",
+            "-i",
+            &recovery_bin,
             "-c",
             config_path,
             "--in-place",
@@ -330,6 +368,14 @@ fn create_tar(
     if !app_status.has_second_signature && !allow_one_signature {
         all_signed = false;
         unsigned_files.push("app.bin".to_string());
+    }
+
+    // Check recovery.bin
+    let recovery_bin = format!("{}/recovery.bin", version_folder);
+    let recovery_status = check_signatures(&recovery_bin)?;
+    if !recovery_status.has_second_signature && !allow_one_signature {
+        all_signed = false;
+        unsigned_files.push("recovery.bin".to_string());
     }
 
     // Check all app files
@@ -598,6 +644,20 @@ fn validate(version_folder: &str, firmware_version: &str, files_only: bool) -> R
         let app_status = check_signatures(&app_bin)?;
         if !app_status.has_second_signature {
             unsigned_files.push("app.bin".to_string());
+            all_valid = false;
+        }
+    }
+
+    // Check recovery.bin
+    let recovery_bin = format!("{}/recovery.bin", version_folder);
+    if !Path::new(&recovery_bin).exists() {
+        println!("  {} recovery.bin is missing", "✗".red());
+        missing_files.push("recovery.bin".to_string());
+        all_valid = false;
+    } else {
+        let recovery_status = check_signatures(&recovery_bin)?;
+        if !recovery_status.has_second_signature {
+            unsigned_files.push("recovery.bin".to_string());
             all_valid = false;
         }
     }

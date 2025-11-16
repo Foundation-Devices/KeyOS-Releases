@@ -387,7 +387,7 @@ sign-bl VERSION SECRETS_DIR:
 
     # Quick, non-secret file size checks
     echo "Input file sizes (bytes):"
-    wc -c "$BOOT_IN" "$CUST" "$PRIV" "$ACT" 2>/dev/null || true
+    wc -c "$BOOT_IN" "$CUST" "$ACT" 2>/dev/null || true
 
     # Build exact command as an array for reliability
     CMD=("$PY" "$SAMBA" bootstrap -d sama5d2x -l "$ACT" -k "$CUST" -i "$BOOT_IN" -o boot.cip)
