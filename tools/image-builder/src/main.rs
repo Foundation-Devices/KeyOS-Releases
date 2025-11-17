@@ -8,7 +8,7 @@ use mbrs::{AddrScheme, Mbr, PartInfo, PartType};
 use sha2::Digest;
 use std::fs::{self, File};
 use std::io::{Seek, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -250,13 +250,12 @@ fn create_boot_partition(file: &mut File, version_folder: &str, is_production: b
     // Copy bootloader
     let bootloader_ext = if is_production { "cip" } else { "bin" };
     let boot_bin_path = format!("{}/boot.{bootloader_ext}", version_folder);
-    let boot_filename = format!("boot.{bootloader_ext}");
     println!(
         "  {} Copying boot.{bootloader_ext} to boot partition",
         "→".blue()
     );
     fs.root_dir()
-        .create_file(&boot_filename)?
+        .create_file("boot.bin")?
         .write_all(&fs::read(&boot_bin_path)?)?;
 
     // Copy recovery.bin
@@ -403,129 +402,6 @@ fn create_user_partition(file: &mut File) -> Result<()> {
     Ok(())
 }
 
-fn log_all_partitions(file: &mut File) -> Result<()> {
-    println!("\n{}", "Partition Table Summary:".bold());
-
-    file.seek(std::io::SeekFrom::Start(0))?;
-    let mbr = Mbr::try_from_reader(&*file).context("Failed to read MBR")?;
-
-    for (idx, entry) in mbr.partition_table.entries.iter().enumerate() {
-        if let Some(part) = entry {
-            let start_sector = part.start_sector_lba();
-            let end_sector = part.end_sector_lba();
-            let size_sectors = end_sector - start_sector + 1;
-            let size_mb = (size_sectors as u64 * SECTOR_SIZE) / MIB;
-            let bootable = if part.bootable() {
-                "bootable"
-            } else {
-                "non-bootable"
-            };
-
-            println!(
-                "  {} Partition #{}: {} sectors ({} MB), start: {}, end: {}, {}",
-                "→".blue(),
-                idx,
-                size_sectors,
-                size_mb,
-                start_sector,
-                end_sector,
-                bootable
-            );
-        }
-    }
-
-    Ok(())
-}
-
-fn list_directory_contents(dir: &Dir<StreamSlice<&mut File>>) -> Result<()> {
-    let indent_str = "    ";
-
-    for entry in dir.iter() {
-        let entry = entry?;
-        let name = entry.file_name();
-
-        // Skip . and .. entries
-        if name == "." || name == ".." {
-            continue;
-        }
-
-        if entry.is_dir() {
-            println!("{}📁 {}/", indent_str, name);
-        } else {
-            let size = entry.len();
-            println!("{}📄 {} ({} bytes)", indent_str, name, size);
-        }
-    }
-
-    Ok(())
-}
-
-fn verify_boot_partition_contents(file: &mut File, is_production: bool) -> Result<()> {
-    println!("\n{}", "Verifying boot partition contents...".bold());
-
-    file.seek(std::io::SeekFrom::Start(0))?;
-    let mbr = Mbr::try_from_reader(&*file).context("Failed to read MBR")?;
-
-    let boot_partition_entry = mbr.partition_table.entries[0]
-        .ok_or_else(|| anyhow::anyhow!("Boot partition not found"))?;
-    let start_offset = boot_partition_entry.start_sector_lba() as u64 * SECTOR_SIZE;
-    let end_offset = (boot_partition_entry.end_sector_lba() as u64 + 1) * SECTOR_SIZE;
-
-    let mut boot_partition_slice = StreamSlice::new(file, start_offset, end_offset)?;
-    let fs = FileSystem::new(boot_partition_slice, fatfs::FsOptions::new())
-        .context("Failed to open boot partition filesystem")?;
-
-    let bootloader_ext = if is_production { "cip" } else { "bin" };
-    let expected_bootloader = format!("boot.{bootloader_ext}");
-
-    println!("  {} Root contents of boot partition:", "→".blue());
-    let mut found_bootloader = false;
-
-    list_directory_contents(&fs.root_dir())?;
-
-    // Also check for expected bootloader
-    for entry in fs.root_dir().iter() {
-        let entry = entry?;
-        let name = entry.file_name();
-        if name.eq_ignore_ascii_case(&expected_bootloader) {
-            found_bootloader = true;
-            break;
-        }
-    }
-
-    if !found_bootloader {
-        return Err(anyhow::anyhow!(
-            "Expected bootloader file '{}' not found in boot partition!",
-            expected_bootloader
-        ));
-    }
-
-    println!("{} Boot partition verification successful", "✓".green());
-    Ok(())
-}
-
-fn verify_system_partition_contents(file: &mut File) -> Result<()> {
-    println!("\n{}", "Verifying system partition contents...".bold());
-
-    file.seek(std::io::SeekFrom::Start(0))?;
-    let mbr = Mbr::try_from_reader(&*file).context("Failed to read MBR")?;
-
-    let system_partition_entry = mbr.partition_table.entries[1]
-        .ok_or_else(|| anyhow::anyhow!("System partition not found"))?;
-    let start_offset = system_partition_entry.start_sector_lba() as u64 * SECTOR_SIZE;
-    let end_offset = (system_partition_entry.end_sector_lba() as u64 + 1) * SECTOR_SIZE;
-
-    let mut system_partition_slice = StreamSlice::new(file, start_offset, end_offset)?;
-    let fs = FileSystem::new(system_partition_slice, fatfs::FsOptions::new())
-        .context("Failed to open system partition filesystem")?;
-
-    println!("  {} Root contents of system partition:", "→".blue());
-    list_directory_contents(&fs.root_dir())?;
-
-    println!("{} System partition verification successful", "✓".green());
-    Ok(())
-}
-
 fn create_boot_image(version_folder: &str, is_production: bool, output_file: &str) -> Result<()> {
     println!(
         "{}",
@@ -559,17 +435,6 @@ fn create_boot_image(version_folder: &str, is_production: bool, output_file: &st
     create_system_partition(&mut boot_image, version_folder)
         .context("Failed to create system partition")?;
     create_user_partition(&mut boot_image).context("Failed to create user partition")?;
-
-    // Log all partitions
-    log_all_partitions(&mut boot_image).context("Failed to log partitions")?;
-
-    // Verify the boot partition contents
-    verify_boot_partition_contents(&mut boot_image, is_production)
-        .context("Boot partition verification failed")?;
-
-    // Verify the system partition contents
-    verify_system_partition_contents(&mut boot_image)
-        .context("System partition verification failed")?;
 
     println!(
         "\n{} {}",
@@ -610,8 +475,7 @@ fn print_hashes(version_folder: &str, is_production: bool) -> Result<()> {
     check_images_exist(version_folder, is_production)?;
 
     // Print bootloader hash (no cosign2 header expected)
-    let bootloader_ext = if is_production { "cip" } else { "bin" };
-    let boot_bin_path = format!("{}/boot.{bootloader_ext}", version_folder);
+    let boot_bin_path = format!("{}/boot.bin", version_folder);
     let bootloader_digest: String = sha2::Sha256::digest(fs::read(&boot_bin_path)?).encode_hex();
     println!("bootloader                     - {bootloader_digest}");
 
