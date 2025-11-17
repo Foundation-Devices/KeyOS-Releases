@@ -188,14 +188,35 @@ create-image VERSION OUTPUT="boot.img":
     WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
     WT="$WORKTREES_DIR/$VER"
 
-    # Determine the folder that contains the version's files
-    VERSION_FOLDER="$VER"
-    if [ -d "$WT/$VER" ]; then
-        VERSION_FOLDER="$WT/$VER"
+    mkdir -p "$WORKTREES_DIR"
+
+    # Ensure the release branch exists locally
+    if ! git -C "$ROOT" rev-parse --verify "$VER" >/dev/null 2>&1; then
+        echo "ERROR: Branch '$VER' not found" >&2
+        exit 1
     fi
 
-    echo "Creating disk image for version $VER (folder: $VERSION_FOLDER)"
-    cargo run --manifest-path "$ROOT/tools/image-builder/Cargo.toml" -- --production create-image "$VERSION_FOLDER" --output "{{OUTPUT}}"
+    # Prepare/update a dedicated worktree for this version
+    git -C "$ROOT" fetch --all --prune
+    if git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        :
+    elif [ -e "$WT" ]; then
+        echo "ERROR: Worktree path exists but is not a git worktree: $WT" >&2
+        exit 1
+    else
+        git -C "$ROOT" worktree add "$WT" "$VER"
+    fi
+    git -C "$WT" pull --rebase
+
+    # Verify the release directory exists in the worktree
+    if [ ! -d "$WT/$VER" ]; then
+        echo "ERROR: Release directory not found: $WT/$VER" >&2
+        exit 1
+    fi
+
+    echo "Creating disk image for version $VER from worktree: $WT/$VER"
+    cargo run --manifest-path "$ROOT/tools/image-builder/Cargo.toml" -- --production create-image "$WT/$VER" --output "$WT/$VER/{{OUTPUT}}"
+    echo "✅ Image created: $WT/$VER/{{OUTPUT}}"
 
 # Create a bootable disk image from firmware components (development)
 create-image-dev VERSION OUTPUT="boot.img":
@@ -207,13 +228,35 @@ create-image-dev VERSION OUTPUT="boot.img":
     WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
     WT="$WORKTREES_DIR/$VER"
 
-    VERSION_FOLDER="$VER"
-    if [ -d "$WT/$VER" ]; then
-        VERSION_FOLDER="$WT/$VER"
+    mkdir -p "$WORKTREES_DIR"
+
+    # Ensure the release branch exists locally
+    if ! git -C "$ROOT" rev-parse --verify "$VER" >/dev/null 2>&1; then
+        echo "ERROR: Branch '$VER' not found" >&2
+        exit 1
     fi
 
-    echo "Creating disk image for version $VER (folder: $VERSION_FOLDER)"
-    cargo run --manifest-path "$ROOT/tools/image-builder/Cargo.toml" -- create-image "$VERSION_FOLDER" --output "{{OUTPUT}}"
+    # Prepare/update a dedicated worktree for this version
+    git -C "$ROOT" fetch --all --prune
+    if git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        :
+    elif [ -e "$WT" ]; then
+        echo "ERROR: Worktree path exists but is not a git worktree: $WT" >&2
+        exit 1
+    else
+        git -C "$ROOT" worktree add "$WT" "$VER"
+    fi
+    git -C "$WT" pull --rebase
+
+    # Verify the release directory exists in the worktree
+    if [ ! -d "$WT/$VER" ]; then
+        echo "ERROR: Release directory not found: $WT/$VER" >&2
+        exit 1
+    fi
+
+    echo "Creating disk image for version $VER from worktree: $WT/$VER"
+    cargo run --manifest-path "$ROOT/tools/image-builder/Cargo.toml" -- create-image "$WT/$VER" --output "$WT/$VER/{{OUTPUT}}"
+    echo "✅ Image created: $WT/$VER/{{OUTPUT}}"
 
 # Print SHA256 hashes of firmware components
 print-hashes VERSION:
@@ -433,3 +476,21 @@ sign-bl VERSION SECRETS_DIR:
         ls -l "$WT/$VER"/*.cip 2>/dev/null || true
         exit 1
     fi
+
+    # Stage and commit the signed bootloader changes within the worktree
+    git -C "$WT" add -A "$VER"
+    if git -C "$WT" diff --cached --quiet -- "$VER"; then
+        echo "No changes detected in $VER; aborting commit." >&2
+        exit 1
+    fi
+
+    MSG="Bootloader signed and pushed"
+    git -C "$WT" commit -m "$MSG"
+    # Push to upstream or set it if missing
+    if git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+        git -C "$WT" push
+    else
+        git -C "$WT" push -u origin "$VER"
+    fi
+
+    echo "✅ $MSG"
