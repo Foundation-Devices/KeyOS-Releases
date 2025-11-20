@@ -1,15 +1,1 @@
-{
-  "appName": {
-    "en": "Settings"
-  },
-  "appDescription": {},
-  "appId": "0xc192b79230473875f159d4423d74d00f",
-  "appSignature": "0x00",
-  "servers": [],
-  "permissions": [
-    {
-      "server": "os/gui-server",
-      "messages": "0..128"
-    }
-  ]
-}
+{"appName":{"en":"Settings"},"appId":"0xc192b79230473875f159d4423d74d00f","servers":{},"permissions":{"os/backup":["StatusSubscribe"],"os/settings":["GetDebugTouch","GetShowSecurityWords","SetUseStandardTimeFormat","SetAutoLock","GetEnvoyTimeSync","SetScreenBrightness","GetSystemTheme","SubscribeSystemTheme","SetDeviceName","GetAutoLock","SubscribeScreenBrightness","SetSystemTheme","SetTimeZone","GetMagicBackupEnabled","SubscribeDebugTouch","SetMagicBackupEnabled","SetEnvoyTimeSync","GetDeviceName","GetUseStandardTimeFormat","GetPrimeColor","GetOnboardingStatus","GetTimeZone","SetShowSecurityWords"],"os/security":["GetOsVersionInfo","Lockout","GetPinEntryMode","GetSeed","ChangePin","GetDeviceId"],"os/bt":["GetBtAddr","GetBleVersionInfo","GetState"],"os/fs":["Flush","Remove","OpenFileMessage","SeekFile","TruncateFile","FlushFs","AsyncRead","AsyncWrite","CreateDirMessage","Rename","MapFileMessage","ReadFile","AtomicCopy","SubscribeFilesystemEvent","GetUserReadAccess","OpenDirMessage","AsyncCopyBlock","NextEntry","WriteFile","CloseFile","SetLen","CloseDir","GetMetadata"],"os/quantum-link":["GetXidDocument","SubscribePairingEvent","ClearPairedDevice"],"os/gui-server":["SwapBuffers","HideKeyboard","UpdateKeyboard","RegisterAppMessage","SwitchToLauncher","AnimateNextFrame","RequestRedraw","ShowModal"],"os/power-manager":["SetOtgPriority","GetStatus","Reboot","GetExtendedStatus"]},"memory":[],"syscall":[]}

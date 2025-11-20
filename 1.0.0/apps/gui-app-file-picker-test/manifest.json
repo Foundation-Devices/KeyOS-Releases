@@ -1,15 +1,1 @@
-{
-  "appName": {
-    "en": "File Picker Demo"
-  },
-  "appDescription": {},
-  "appId": "0xd7578c121c1d86fd541a086662de6dd6",
-  "appSignature": "0x00",
-  "servers": [],
-  "permissions": [
-    {
-      "server": "os/gui-server",
-      "messages": "0..128"
-    }
-  ]
-}
+{"appName":{"en":"File Picker Demo"},"appId":"0xd7578c121c1d86fd541a086662de6dd6","servers":{},"permissions":{"os/fs":["GetMetadata","OpenDirMessage","NextEntry","MapFileMessage","CloseDir"],"os/settings":["SubscribeSystemTheme","SubscribeDebugTouch","GetDebugTouch","GetSystemTheme"],"os/gui-server":["ShowModal","SwapBuffers","RegisterAppMessage","RequestRedraw","UpdateKeyboard","HideKeyboard","AnimateNextFrame"]},"memory":[],"syscall":[]}
