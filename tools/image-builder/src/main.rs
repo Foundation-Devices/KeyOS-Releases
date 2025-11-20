@@ -106,8 +106,9 @@ fn strip_v_prefix(version: &str) -> String {
 }
 
 fn check_images_exist(version_folder: &str, is_production: bool) -> Result<()> {
-    let bootloader_ext = if is_production { "cip" } else { "bin" };
-    let boot_bin = format!("{version_folder}/boot.{bootloader_ext}");
+    // Check for bootloader: prefer boot.cip if it exists, otherwise boot.bin
+    let boot_cip = format!("{version_folder}/boot.cip");
+    let boot_bin = format!("{version_folder}/boot.bin");
     let blassets = format!("{version_folder}/blassets");
     let common = format!("{version_folder}/common");
     let common_boot = format!("{version_folder}/common-boot");
@@ -115,9 +116,10 @@ fn check_images_exist(version_folder: &str, is_production: bool) -> Result<()> {
     let app_bin = format!("{version_folder}/app.bin");
     let recovery_bin = format!("{version_folder}/recovery.bin");
 
-    if !Path::new(&boot_bin).exists() {
+    // Check for bootloader file (prefer boot.cip, fallback to boot.bin)
+    if !Path::new(&boot_cip).exists() && !Path::new(&boot_bin).exists() {
         return Err(ImageBuilderError::FileNotFound(format!(
-            "boot.{bootloader_ext} not found in {version_folder}. This file is required to boot KeyOS.",
+            "Neither boot.cip nor boot.bin found in {version_folder}. At least one is required to boot KeyOS.",
         ))
         .into());
     }
@@ -247,16 +249,25 @@ fn create_boot_partition(file: &mut File, version_folder: &str, is_production: b
     )
     .context("formatting boot partition")?;
 
-    // Copy bootloader
-    let bootloader_ext = if is_production { "cip" } else { "bin" };
-    let boot_bin_path = format!("{}/boot.{bootloader_ext}", version_folder);
+    // Copy bootloader - prefer boot.cip if it exists, otherwise boot.bin
+    // Do NOT rename - the ROM bootloader expects boot.cip in secure boot mode
+    let boot_cip_path = format!("{}/boot.cip", version_folder);
+    let boot_bin_path = format!("{}/boot.bin", version_folder);
+
+    let (bootloader_src, bootloader_dst) = if Path::new(&boot_cip_path).exists() {
+        (boot_cip_path, "boot.cip")
+    } else {
+        (boot_bin_path, "boot.bin")
+    };
+
     println!(
-        "  {} Copying boot.{bootloader_ext} to boot partition",
-        "→".blue()
+        "  {} Copying {} to boot partition",
+        "→".blue(),
+        bootloader_dst
     );
     fs.root_dir()
-        .create_file("boot.bin")?
-        .write_all(&fs::read(&boot_bin_path)?)?;
+        .create_file(bootloader_dst)?
+        .write_all(&std::fs::read(&bootloader_src)?)?;
 
     // Copy recovery.bin
     let recovery_bin_path = format!("{}/recovery.bin", version_folder);
@@ -479,11 +490,11 @@ fn verify_boot_partition_contents(file: &mut File, is_production: bool) -> Resul
 
     list_directory_contents(&fs.root_dir())?;
 
-    // Check for boot.bin (the bootloader should always be named boot.bin on the FAT partition)
+    // Check for bootloader file (boot.cip in secure boot mode, boot.bin otherwise)
     for entry in fs.root_dir().iter() {
         let entry = entry?;
         let name = entry.file_name();
-        if name.eq_ignore_ascii_case("boot.bin") {
+        if name.eq_ignore_ascii_case("boot.cip") || name.eq_ignore_ascii_case("boot.bin") {
             found_bootloader = true;
             break;
         }
@@ -491,7 +502,7 @@ fn verify_boot_partition_contents(file: &mut File, is_production: bool) -> Resul
 
     if !found_bootloader {
         return Err(anyhow::anyhow!(
-            "Expected bootloader file 'boot.bin' not found in boot partition!"
+            "Expected bootloader file (boot.cip or boot.bin) not found in boot partition!"
         ));
     }
 
@@ -605,9 +616,15 @@ fn print_hashes(version_folder: &str, is_production: bool) -> Result<()> {
     check_images_exist(version_folder, is_production)?;
 
     // Print bootloader hash (no cosign2 header expected)
-    let bootloader_ext = if is_production { "cip" } else { "bin" };
-    let boot_bin_path = format!("{}/boot.{bootloader_ext}", version_folder);
-    let bootloader_digest: String = sha2::Sha256::digest(fs::read(&boot_bin_path)?).encode_hex();
+    // Prefer boot.cip if it exists, otherwise boot.bin
+    let boot_cip_path = format!("{}/boot.cip", version_folder);
+    let boot_bin_path = format!("{}/boot.bin", version_folder);
+    let bootloader_path = if Path::new(&boot_cip_path).exists() {
+        &boot_cip_path
+    } else {
+        &boot_bin_path
+    };
+    let bootloader_digest: String = sha2::Sha256::digest(fs::read(bootloader_path)?).encode_hex();
     println!("bootloader                     - {bootloader_digest}");
 
     // Print app image hash (with cosign2 header)
