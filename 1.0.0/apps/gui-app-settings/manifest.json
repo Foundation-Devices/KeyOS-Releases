@@ -1,15 +1,1 @@
-{
-  "appName": {
-    "en": "Settings"
-  },
-  "appDescription": {},
-  "appId": "0xc192b79230473875f159d4423d74d00f",
-  "appSignature": "0x00",
-  "servers": [],
-  "permissions": [
-    {
-      "server": "os/gui-server",
-      "messages": "0..128"
-    }
-  ]
-}
+{"appName":{"en":"Settings"},"appId":"0xc192b79230473875f159d4423d74d00f","servers":{},"permissions":{"os/backup":["StatusSubscribe"],"os/quantum-link":["GetXidDocument","SubscribePairingEvent","ClearPairedDevice"],"os/settings":["GetPrimeColor","GetAutoLock","SubscribeScreenBrightness","GetSystemTheme","GetTimeZone","SetTimeZone","SetScreenBrightness","SetShowSecurityWords","GetMagicBackupEnabled","SetMagicBackupEnabled","SetAutoLock","GetUseStandardTimeFormat","GetEnvoyTimeSync","SubscribeDebugTouch","GetDebugTouch","SetSystemTheme","GetDeviceName","SetDeviceName","GetShowSecurityWords","SetUseStandardTimeFormat","SetEnvoyTimeSync","SubscribeSystemTheme","GetOnboardingStatus"],"os/bt":["GetState","GetBtAddr","GetBleVersionInfo"],"os/fs":["MapFileMessage","Rename","OpenDirMessage","AsyncWrite","AsyncCopyBlock","CloseDir","AtomicCopy","GetMetadata","OpenFileMessage","SetLen","GetUserReadAccess","TruncateFile","Remove","AsyncRead","SubscribeFilesystemEvent","CreateDirMessage","ReadFile","SeekFile","FlushFs","Flush","NextEntry","WriteFile","CloseFile"],"os/gui-server":["UpdateKeyboard","ShowModal","HideKeyboard","RequestRedraw","RegisterAppMessage","AnimateNextFrame","SwitchToLauncher","SwapBuffers"],"os/power-manager":["Reboot","GetExtendedStatus","SetOtgPriority","GetStatus"],"os/security":["ChangePin","Lockout","GetDeviceId","GetSeed","GetOsVersionInfo","GetPinEntryMode"]},"memory":[],"syscall":[]}
