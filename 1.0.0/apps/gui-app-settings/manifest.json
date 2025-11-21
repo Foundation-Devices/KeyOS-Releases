@@ -1,15 +1,1 @@
-{
-  "appName": {
-    "en": "Settings"
-  },
-  "appDescription": {},
-  "appId": "0xc192b79230473875f159d4423d74d00f",
-  "appSignature": "0x00",
-  "servers": [],
-  "permissions": [
-    {
-      "server": "os/gui-server",
-      "messages": "0..128"
-    }
-  ]
-}
+{"appName":{"en":"Settings"},"appId":"0xc192b79230473875f159d4423d74d00f","servers":{},"permissions":{"os/power-manager":["GetStatus","Reboot","SetOtgPriority","GetExtendedStatus"],"os/bt":["GetBleVersionInfo","GetState","GetBtAddr"],"os/fs":["SeekFile","ReadFile","OpenDirMessage","WriteFile","TruncateFile","SetLen","NextEntry","FlushFs","SubscribeFilesystemEvent","Rename","Flush","OpenFileMessage","CloseDir","GetUserReadAccess","CreateDirMessage","MapFileMessage","Remove","AsyncWrite","AsyncCopyBlock","GetMetadata","CloseFile","AtomicCopy","AsyncRead"],"os/quantum-link":["SubscribePairingEvent","ClearPairedDevice","GetXidDocument"],"os/backup":["StatusSubscribe"],"os/settings":["SubscribeSystemTheme","SubscribeDebugTouch","GetUseStandardTimeFormat","GetMagicBackupEnabled","GetPrimeColor","GetOnboardingStatus","GetDeviceName","GetEnvoyTimeSync","GetDebugTouch","GetTimeZone","GetSystemTheme","SubscribeScreenBrightness","SetSystemTheme","SetShowSecurityWords","SetMagicBackupEnabled","SetUseStandardTimeFormat","GetAutoLock","SetTimeZone","SetAutoLock","GetShowSecurityWords","SetEnvoyTimeSync","SetDeviceName","SetScreenBrightness"],"os/gui-server":["ShowModal","RegisterAppMessage","RequestRedraw","HideKeyboard","SwitchToLauncher","UpdateKeyboard","AnimateNextFrame","SwapBuffers"],"os/security":["ChangePin","GetPinEntryMode","GetOsVersionInfo","Lockout","GetSeed","GetDeviceId"]},"memory":[],"syscall":[]}
