@@ -1,15 +1,1 @@
-{
-  "appName": {
-    "en": "Bitcoin Wallet"
-  },
-  "appDescription": {},
-  "appId": "0x426974636f696e2057616c6c65740000",
-  "appSignature": "0x00",
-  "servers": [],
-  "permissions": [
-    {
-      "server": "os/gui-server",
-      "messages": "0..128"
-    }
-  ]
-}
+{"appName":{"en":"Bitcoin Wallet"},"appId":"0x426974636f696e2057616c6c65740000","servers":{},"permissions":{"os/gui-server":["HideKeyboard","ShowModal","UpdateKeyboard","RequestRedraw","AnimateNextFrame","SwapBuffers","RegisterAppMessage"],"os/fs":["AsyncCopyBlock","AtomicCopy","AsyncRead","NextEntry","AsyncWrite","TruncateFile","Rename","ReadFile","GetUsbWriteAccess","CloseDir","SeekFile","GetUserReadAccess","FlushFs","MapFileMessage","GetAirlockReadAccess","GetUserWriteAccess","OpenFileMessage","GetUsbReadAccess","CreateDirMessage","WriteFile","SetLen","SubscribeFilesystemEvent","Flush","GetMetadata","Remove","OpenDirMessage","CloseFile","GetAirlockWriteAccess"],"os/security":["GetDeviceId","GetOsVersionInfo","GetSeed"],"os/quantum-link":["SubscribeExchangeRate","SubscribeAccountUpdate","PublishPsbt","SubscribeSignPsbt","SendAccountUpdate"],"os/settings":["GetLocale","GetSystemTheme","SubscribeSystemTheme","GetDebugTouch","SubscribeDebugTouch","GetDeviceName"]},"memory":[],"syscall":[]}
