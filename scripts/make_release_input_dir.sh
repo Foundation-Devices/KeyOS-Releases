@@ -71,7 +71,7 @@ fi
 cd "$KEYOS_DIR"
 
 info "generating firmware components in 'keyos'"
-cargo xtask build-all --dont-sign
+cargo xtask build --dont-sign --reproducible
 
 cd "$START_DIR"
 
