@@ -70,6 +70,20 @@ fi
 
 cd "$KEYOS_DIR"
 
+info "checking 'keyos' git status"
+
+if [ ! -d .git ]; then
+    error "keyos directory at '$(pwd)' is not a git repository"
+    exit 1
+fi
+
+if [ -n "$(git status --porcelain)" ]; then
+    error "keyos repository at '$(pwd)' has uncommitted changes. Please commit or stash them before running this script."
+    exit 1
+fi
+
+KEYOS_COMMIT=$(git rev-parse HEAD)
+
 info "generating firmware components in 'keyos'"
 cargo xtask build --dont-sign --reproducible
 
@@ -77,6 +91,8 @@ cd "$START_DIR"
 
 info "preparing release input directory"
 mkdir "$FIRMWARE_VERSION"
+
+echo "$KEYOS_COMMIT" > "$FIRMWARE_VERSION/keyos-commit.txt"
 
 cp "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images/app.bin" "$FIRMWARE_VERSION"
 cp -r "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/apps/" "$FIRMWARE_VERSION"
