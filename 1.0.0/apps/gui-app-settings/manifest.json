@@ -1,15 +1,1 @@
-{
-  "appName": {
-    "en": "Settings"
-  },
-  "appDescription": {},
-  "appId": "0xc192b79230473875f159d4423d74d00f",
-  "appSignature": "0x00",
-  "servers": [],
-  "permissions": [
-    {
-      "server": "os/gui-server",
-      "messages": "0..128"
-    }
-  ]
-}
+{"appName":{"en":"Settings"},"appId":"0xc192b79230473875f159d4423d74d00f","servers":{},"permissions":{"os/security":["Lockout","GetSeed","GetPinEntryMode","ChangePin","GetOsVersionInfo","GetDeviceId"],"os/settings":["SetDeviceName","GetEnvoyTimeSync","SetTimeZone","SetScreenBrightness","GetDeviceName","GetMagicBackupEnabled","SetMagicBackupEnabled","GetPrimeColor","SetSystemTheme","GetTimeZone","GetOnboardingStatus","GetDebugTouch","SetShowSecurityWords","GetUseStandardTimeFormat","SetEnvoyTimeSync","GetSystemTheme","GetAutoLock","SetUseStandardTimeFormat","SubscribeSystemTheme","SetAutoLock","SubscribeScreenBrightness","SubscribeDebugTouch","GetShowSecurityWords"],"os/backup":["StatusSubscribe","CreateBackup"],"os/bt":["GetBtAddr","GetBleVersionInfo","SubscribeBleState"],"os/quantum-link":["SubscribePairingEvent","GetXidDocument","ClearPairedDevice"],"os/gui-server":["SwapBuffers","ShowModal","RequestRedraw","SwitchToLauncher","RegisterAppMessage","AnimateNextFrame","UpdateKeyboard","HideKeyboard"],"os/power-manager":["Reboot","SetOtgPriority","GetStatus","GetExtendedStatus"],"os/fs":["SubscribeFilesystemEvent","OpenDirMessage","FlushFs","CreateDirMessage","GetUserReadAccess","NextEntry","SetLen","TruncateFile","OpenFileMessage","ReadFile","GetMetadata","Flush","WriteFile","SeekFile","Rename","AtomicCopy","Remove","AsyncRead","CloseFile","AsyncWrite","AsyncCopyBlock","CloseDir","MapFileMessage"]},"memory":[],"syscall":[]}
