@@ -81,6 +81,8 @@ const USER_PARTITION_START_SECTOR: u32 =
 fn main() -> Result<()> {
     env_logger::init();
 
+    panic!("This tool is deprecated, do not use.");
+
     let cli = Cli::parse();
 
     match &cli.command {
