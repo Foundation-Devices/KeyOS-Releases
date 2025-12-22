@@ -169,6 +169,11 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
                     String::from_utf8_lossy(&output.stderr)
                 );
 
+                let patch_metadata = fs::metadata(&patch_file).with_context(|| {
+                    format!("Reading patch file metadata: {}", abs_path(&patch_file))
+                })?;
+                let patch_size = patch_metadata.len();
+
                 let file = base_file.to_str().expect(PATH_TO_STR_ERROR).to_string();
 
                 actions.push(Action::Patch {
@@ -177,7 +182,11 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
                     base_version: args.base_version.clone(),
                     new_version: args.new_version.clone(),
                 });
-                println!("[INFO] action/patch: {}", base_file.display());
+                println!(
+                    "[INFO] action/patch ({}): {}",
+                    format_size(patch_size),
+                    base_file.display(),
+                );
             }
         }
     }
@@ -342,4 +351,17 @@ fn abs_path<P: AsRef<Path>>(path: P) -> impl Display {
         .expect("failed to get absolute path")
         .to_string_lossy()
         .to_string()
+}
+
+fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+
+    if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.0} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
 }
