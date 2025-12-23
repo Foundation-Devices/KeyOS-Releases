@@ -77,7 +77,7 @@ enum Commands {
     Validate {
         /// Version number (e.g., 1.0.2)
         version: String,
-        /// Only check app.bin and apps; skip manifest and tar presence
+        /// Only check keyos/app.bin and apps; skip manifest and tar presence
         #[arg(long)]
         files_only: bool,
     },
@@ -177,7 +177,7 @@ fn sign_files(
     }
 
     // Check for required files
-    let app_bin = format!("{}/app.bin", version_folder);
+    let app_bin = format!("{}/keyos/app.bin", version_folder);
     let recovery_bin = format!("{}/recovery.bin", version_folder);
 
     if !Path::new(&app_bin).exists() {
@@ -188,7 +188,7 @@ fn sign_files(
         return Err(SignerError::FileNotFound(recovery_bin).into());
     }
 
-    // Sign app.bin
+    // Sign keyos/app.bin
     print!(
         "Signing KeyOS image ({})...",
         Path::new(&app_bin).file_name().unwrap().to_string_lossy()
@@ -260,7 +260,7 @@ fn sign_files(
         )
         .bold()
     );
-    let apps_dir = format!("{}/apps", version_folder);
+    let apps_dir = format!("{}/keyos/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
 
     if apps_path.is_dir() {
@@ -359,7 +359,7 @@ fn create_tar(
 
     println!("Checking signatures on all files...");
 
-    let app_bin = format!("{}/app.bin", version_folder);
+    let app_bin = format!("{}/keyos/app.bin", version_folder);
 
     let mut all_signed = true;
     let mut unsigned_files = Vec::new();
@@ -367,7 +367,7 @@ fn create_tar(
     let app_status = check_signatures(&app_bin)?;
     if !app_status.has_second_signature && !allow_one_signature {
         all_signed = false;
-        unsigned_files.push("app.bin".to_string());
+        unsigned_files.push("keyos/app.bin".to_string());
     }
 
     // Check recovery.bin
@@ -379,7 +379,7 @@ fn create_tar(
     }
 
     // Check all app files
-    let apps_dir = format!("{}/apps", version_folder);
+    let apps_dir = format!("{}/keyos/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
 
     if apps_path.is_dir() {
@@ -427,8 +427,8 @@ fn create_tar(
     // Collect all files to include in the tar
     let mut files_to_include = Vec::new();
 
-    // Add app.bin
-    let app_bin = format!("{}/app.bin", version_folder);
+    // Add keyos/app.bin
+    let app_bin = format!("{}/keyos/app.bin", version_folder);
     files_to_include.push(app_bin);
 
     // Add manifest.json
@@ -436,7 +436,7 @@ fn create_tar(
     files_to_include.push(manifest_file.clone());
 
     // Add all .elf files in the apps directory
-    let apps_dir = format!("{}/apps", version_folder);
+    let apps_dir = format!("{}/keyos/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
     if apps_path.is_dir() {
         for entry in fs::read_dir(apps_path).context("Failed to read apps directory")? {
@@ -457,7 +457,7 @@ fn create_tar(
 
     // Add all assets in the common directory
     let mut num_assets = 0;
-    let common_dir = format!("{}/common", version_folder);
+    let common_dir = format!("{}/keyos/common", version_folder);
     let common_path = Path::new(&common_dir);
     if common_path.is_dir() {
         for entry in fs::read_dir(common_path).context("Failed to read common directory")? {
@@ -634,16 +634,16 @@ fn validate(version_folder: &str, firmware_version: &str, files_only: bool) -> R
     let mut missing_files = Vec::new();
     let mut unsigned_files = Vec::new();
 
-    // Check app.bin
-    let app_bin = format!("{}/app.bin", version_folder);
+    // Check keyos/app.bin
+    let app_bin = format!("{}/keyos/app.bin", version_folder);
     if !Path::new(&app_bin).exists() {
-        println!("  {} app.bin is missing", "✗".red());
-        missing_files.push("app.bin".to_string());
+        println!("  {} keyos/app.bin is missing", "✗".red());
+        missing_files.push("keyos/app.bin".to_string());
         all_valid = false;
     } else {
         let app_status = check_signatures(&app_bin)?;
         if !app_status.has_second_signature {
-            unsigned_files.push("app.bin".to_string());
+            unsigned_files.push("keyos/app.bin".to_string());
             all_valid = false;
         }
     }
@@ -673,7 +673,7 @@ fn validate(version_folder: &str, firmware_version: &str, files_only: bool) -> R
     }
 
     // Check all app files
-    let apps_dir = format!("{}/apps", version_folder);
+    let apps_dir = format!("{}/keyos/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
 
     if !apps_path.is_dir() {
@@ -826,16 +826,16 @@ fn generate_manifest(version_folder: &str, firmware_version: &str) -> Result<()>
         files: Vec::new(),
     };
 
-    // Add app.bin to manifest
-    let app_bin = format!("{}/app.bin", version_folder);
+    // Add keyos/app.bin to manifest
+    let app_bin = format!("{}/keyos/app.bin", version_folder);
     let app_hash = calculate_hash(&app_bin)?;
     manifest.files.push(FileEntry {
-        name: "app.bin".to_string(),
+        name: "keyos/app.bin".to_string(),
         hash: format!("0x{}", app_hash),
     });
 
     // Add each app to manifest
-    let apps_dir = format!("{}/apps", version_folder);
+    let apps_dir = format!("{}/keyos/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
 
     let mut app_count = 0;

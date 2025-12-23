@@ -4,7 +4,7 @@
 # Sign individual files with the provided key (uses a dedicated git worktree to avoid switching your current branch)
 sign VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -u
 
     VER="{{VERSION}}"
     CFG="{{CONFIG_PATH}}"
@@ -23,23 +23,11 @@ sign VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"
 
     mkdir -p "$WORKTREES_DIR"
 
-    # Ensure the release branch exists locally
-    if ! git -C "$ROOT" rev-parse --verify "$VER" >/dev/null 2>&1; then
-        echo "ERROR: Branch '$VER' not found" >&2
+    # Setup/update worktree using helper function
+    source "$ROOT/tools/worktree-helper.sh"
+    if ! setup_worktree "$ROOT" "$VER" "$WT"; then
         exit 1
     fi
-
-    # Prepare/update a dedicated worktree for this version
-    git -C "$ROOT" fetch --all --prune
-    if git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        :
-    elif [ -e "$WT" ]; then
-        echo "ERROR: Worktree path exists but is not a git worktree: $WT" >&2
-        exit 1
-    else
-        git -C "$ROOT" worktree add "$WT" "$VER"
-    fi
-    git -C "$WT" pull --rebase
 
     # Verify the release directory exists in the worktree
     if [ ! -d "$WT/$VER" ]; then
@@ -82,27 +70,99 @@ sign VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"
 
 # Create tar file (only when all files have two signatures)
 create-tar VERSION:
-    @echo "Creating tar file for version {{VERSION}}"
-    cargo run --manifest-path tools/signer/Cargo.toml -- create-tar {{VERSION}}
+    #!/usr/bin/env bash
+    set -u
+
+    VER="{{VERSION}}"
+    ROOT="{{justfile_directory()}}"
+    WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
+    WT="$WORKTREES_DIR/$VER"
+
+    # Check if worktree exists
+    if [ ! -d "$WT" ]; then
+        echo "ERROR: Worktree not found at $WT" >&2
+        echo "Please run 'just sign $VER' first to create the worktree" >&2
+        exit 1
+    fi
+
+    echo "Creating tar file for version $VER"
+    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-tar "$VER")
+
 
 create-recovery-tar VERSION:
-    @echo "Creating recovery tar file for version {{VERSION}}"
-    cargo run --manifest-path tools/signer/Cargo.toml -- create-tar {{VERSION}} --recovery
+    #!/usr/bin/env bash
+    set -u
+
+    VER="{{VERSION}}"
+    ROOT="{{justfile_directory()}}"
+    WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
+    WT="$WORKTREES_DIR/$VER"
+
+    # Check if worktree exists
+    if [ ! -d "$WT" ]; then
+        echo "ERROR: Worktree not found at $WT" >&2
+        echo "Please run 'just sign $VER' first to create the worktree" >&2
+        exit 1
+    fi
+
+    echo "Creating recovery tar file for version $VER"
+    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-tar "$VER" --recovery)
 
 create-recovery-tar-dev VERSION:
-    @echo "Creating recovery tar file for version {{VERSION}} (one signature)"
-    cargo run --manifest-path tools/signer/Cargo.toml -- create-tar {{VERSION}} --recovery --allow-one-signature
+    #!/usr/bin/env bash
+    set -u
+
+    VER="{{VERSION}}"
+    ROOT="{{justfile_directory()}}"
+    WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
+    WT="$WORKTREES_DIR/$VER"
+
+    # Check if worktree exists
+    if [ ! -d "$WT" ]; then
+        echo "ERROR: Worktree not found at $WT" >&2
+        echo "Please run 'just sign $VER' first to create the worktree" >&2
+        exit 1
+    fi
+
+    echo "Creating recovery tar file for version $VER (one signature)"
+    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-tar "$VER" --recovery --allow-one-signature)
+
 
 # Sign the tar file with the provided key
 sign-tar VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
-    @echo "Signing tar file for version {{VERSION}} with config {{CONFIG_PATH}}"
-    cargo run --manifest-path tools/signer/Cargo.toml -- sign-tar {{VERSION}} {{CONFIG_PATH}}
+    #!/usr/bin/env bash
+    set -u
+
+    VER="{{VERSION}}"
+    CFG="{{CONFIG_PATH}}"
+    ROOT="{{justfile_directory()}}"
+    WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
+    WT="$WORKTREES_DIR/$VER"
+
+    # Expand ~ in config path if present
+    if [[ "$CFG" == "~/"* ]]; then
+        CFG="$HOME/${CFG#~/}"
+    fi
+    if [ ! -f "$CFG" ]; then
+        echo "ERROR: Config file not found: $CFG" >&2
+        exit 1
+    fi
+
+    # Check if worktree exists
+    if [ ! -d "$WT" ]; then
+        echo "ERROR: Worktree not found at $WT" >&2
+        echo "Please run 'just sign $VER' first to create the worktree" >&2
+        exit 1
+    fi
+
+    echo "Signing tar file for version $VER with config $CFG"
+    cargo run --manifest-path tools/signer/Cargo.toml -- sign-tar "$WT" "$CFG"
 
 
 # Revert signing commits for a version and remove its worktree (full reset)
 unsign VERSION:
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -u
 
     VER="{{VERSION}}"
     ROOT="{{justfile_directory()}}"
@@ -112,27 +172,13 @@ unsign VERSION:
     echo "Unsigning version $VER: reverting signing commits and removing worktree"
 
     # Ensure the release branch exists
-    if ! git -C "$ROOT" rev-parse --verify "$VER" >/dev/null 2>&1; then
-        echo "ERROR: Branch '$VER' not found" >&2
+    mkdir -p "$WORKTREES_DIR"
+    # Setup/update worktree using helper function
+    source "$ROOT/tools/worktree-helper.sh"
+    if ! setup_worktree "$ROOT" "$VER" "$WT" CREATED_WT; then
         exit 1
     fi
 
-    mkdir -p "$WORKTREES_DIR"
-    CREATED_WT=0
-    if git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        :
-    else
-        if [ -e "$WT" ]; then
-            echo "ERROR: Worktree path exists but is not a git worktree: $WT" >&2
-            exit 1
-        fi
-        git -C "$ROOT" worktree add "$WT" "$VER"
-        CREATED_WT=1
-    fi
-
-    # Make sure worktree is up-to-date
-    git -C "$WT" fetch --all --prune || true
-    git -C "$WT" pull --rebase || true
 
     # Find signing commits that touched this version directory (newest first)
     COMMITS=$(git -C "$WT" log --pretty=format:%H --grep='signatures applied and pushed' --regexp-ignore-case -- "$VER" || true)
@@ -181,7 +227,7 @@ release-gen *args:
 # Create a bootable disk image from firmware components (production)
 create-image VERSION OUTPUT="boot.img":
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -u
 
     VER="{{VERSION}}"
     ROOT="{{justfile_directory()}}"
@@ -190,25 +236,12 @@ create-image VERSION OUTPUT="boot.img":
 
     mkdir -p "$WORKTREES_DIR"
 
-    # Ensure the release branch exists locally
-    if ! git -C "$ROOT" rev-parse --verify "$VER" >/dev/null 2>&1; then
-        echo "ERROR: Branch '$VER' not found" >&2
+    # Setup/update worktree using helper function
+    source "$ROOT/tools/worktree-helper.sh"
+    if ! setup_worktree "$ROOT" "$VER" "$WT"; then
         exit 1
     fi
 
-    # Prepare/update a dedicated worktree for this version
-    git -C "$ROOT" fetch --all --prune
-    if git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        :
-    elif [ -e "$WT" ]; then
-        echo "ERROR: Worktree path exists but is not a git worktree: $WT" >&2
-        exit 1
-    else
-        git -C "$ROOT" worktree add "$WT" "$VER"
-    fi
-    git -C "$WT" pull --rebase
-
-    # Verify the release directory exists in the worktree
     if [ ! -d "$WT/$VER" ]; then
         echo "ERROR: Release directory not found: $WT/$VER" >&2
         exit 1
@@ -221,7 +254,7 @@ create-image VERSION OUTPUT="boot.img":
 # Create a bootable disk image from firmware components (development)
 create-image-dev VERSION OUTPUT="boot.img":
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -u
 
     VER="{{VERSION}}"
     ROOT="{{justfile_directory()}}"
@@ -230,26 +263,13 @@ create-image-dev VERSION OUTPUT="boot.img":
 
     mkdir -p "$WORKTREES_DIR"
 
-    # Ensure the release branch exists locally
-    if ! git -C "$ROOT" rev-parse --verify "$VER" >/dev/null 2>&1; then
-        echo "ERROR: Branch '$VER' not found" >&2
+    # Setup/update worktree using helper function
+    source "$ROOT/tools/worktree-helper.sh"
+    if ! setup_worktree "$ROOT" "$VER" "$WT"; then
         exit 1
     fi
-
-    # Prepare/update a dedicated worktree for this version
-    git -C "$ROOT" fetch --all --prune
-    if git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        :
-    elif [ -e "$WT" ]; then
-        echo "ERROR: Worktree path exists but is not a git worktree: $WT" >&2
-        exit 1
-    else
-        git -C "$ROOT" worktree add "$WT" "$VER"
-    fi
-    git -C "$WT" pull --rebase
 
     # Verify the release directory exists in the worktree
-    if [ ! -d "$WT/$VER" ]; then
         echo "ERROR: Release directory not found: $WT/$VER" >&2
         exit 1
     fi
@@ -267,7 +287,7 @@ print-hashes VERSION:
 # Finalize a release: update worktree, create production disk image, and recovery tar
 finalize VERSION:
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -u
 
     VER="{{VERSION}}"
     ROOT="{{justfile_directory()}}"
@@ -276,23 +296,11 @@ finalize VERSION:
 
     mkdir -p "$WORKTREES_DIR"
 
-    # Ensure the release branch exists locally
-    if ! git -C "$ROOT" rev-parse --verify "$VER" >/dev/null 2>&1; then
-        echo "ERROR: Branch '$VER' not found" >&2
+    # Setup/update worktree using helper function
+    source "$ROOT/tools/worktree-helper.sh"
+    if ! setup_worktree "$ROOT" "$VER" "$WT"; then
         exit 1
     fi
-
-    echo "Preparing worktree for $VER"
-    git -C "$ROOT" fetch --all --prune
-    if git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        :
-    elif [ -e "$WT" ]; then
-        echo "ERROR: Worktree path exists but is not a git worktree: $WT" >&2
-        exit 1
-    else
-        git -C "$ROOT" worktree add "$WT" "$VER"
-    fi
-    git -C "$WT" pull --rebase || true
 
     # Verify the release directory exists in the worktree
     if [ ! -d "$WT/$VER" ]; then
@@ -315,7 +323,7 @@ finalize VERSION:
 # Optional: SECURE_SAMBA_PYTHON to choose interpreter; otherwise auto-detects venv near the tool or falls back to python3
 sign-bl VERSION SECRETS_DIR:
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -u
 
     VER="{{VERSION}}"
     SEC_DIR_RAW="{{SECRETS_DIR}}"
@@ -386,29 +394,11 @@ sign-bl VERSION SECRETS_DIR:
         fi
     done
 
-    # Ensure the release branch exists locally
-    if ! git -C "$ROOT" rev-parse --verify "$VER" >/dev/null 2>&1; then
-        echo "ERROR: Branch '$VER' not found" >&2
+    # Setup/update worktree using helper function (force reset mode)
+    source "$ROOT/tools/worktree-helper.sh"
+    if ! setup_worktree_force_reset "$ROOT" "$VER" "$WT"; then
         exit 1
     fi
-
-    # Prepare/update a dedicated worktree for this version
-    mkdir -p "$WORKTREES_DIR"
-    git -C "$ROOT" fetch --all --prune
-    if git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        echo "Updating existing worktree at $WT to origin/$VER..."
-        # Ensure we're on the correct branch name locally
-        git -C "$WT" checkout -B "$VER" || true
-    elif [ -e "$WT" ]; then
-        echo "ERROR: Worktree path exists but is not a git worktree: $WT" >&2
-        exit 1
-    else
-        git -C "$ROOT" worktree add "$WT" "$VER"
-    fi
-    # Force sync with latest remote state (handles force-pushes)
-    git -C "$WT" fetch --all --prune || true
-    git -C "$WT" reset --hard "origin/$VER"
-    git -C "$WT" clean -fdx
 
     # Verify the release directory exists and boot.bin is present
     if [ ! -d "$WT/$VER" ]; then
