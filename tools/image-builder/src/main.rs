@@ -8,19 +8,13 @@ use mbrs::{AddrScheme, Mbr, PartInfo, PartType};
 use sha2::Digest;
 use std::fs::{self, File};
 use std::io::{Seek, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 enum ImageBuilderError {
     #[error("File not found: {0}")]
     FileNotFound(String),
-
-    #[error("Directory not found: {0}")]
-    DirectoryNotFound(String),
-
-    #[error("Failed to create image: {0}")]
-    ImageCreationFailed(String),
 }
 
 #[derive(Parser)]
@@ -103,7 +97,7 @@ fn strip_v_prefix(version: &str) -> String {
     }
 }
 
-fn check_images_exist(version_folder: &str, is_production: bool) -> Result<()> {
+fn check_images_exist(version_folder: &str, _is_production: bool) -> Result<()> {
     // Check for bootloader: prefer boot.cip if it exists, otherwise boot.bin
     let boot_cip = format!("{version_folder}/boot.cip");
     let boot_bin = format!("{version_folder}/boot.bin");
@@ -234,7 +228,11 @@ fn format_partition<'a>(
     FileSystem::new(boot_partition, fatfs::FsOptions::new()).context("open filesystem")
 }
 
-fn create_boot_partition(file: &mut File, version_folder: &str, is_production: bool) -> Result<()> {
+fn create_boot_partition(
+    file: &mut File,
+    version_folder: &str,
+    _is_production: bool,
+) -> Result<()> {
     println!("{}", "Creating boot partition...".bold());
 
     let fs = format_partition(
@@ -486,7 +484,7 @@ fn list_directory_contents_recursive(
     Ok(())
 }
 
-fn verify_boot_partition_contents(file: &mut File, is_production: bool) -> Result<()> {
+fn verify_boot_partition_contents(file: &mut File, _is_production: bool) -> Result<()> {
     println!("\n{}", "Verifying boot partition contents...".bold());
 
     file.seek(std::io::SeekFrom::Start(0))?;
@@ -497,7 +495,7 @@ fn verify_boot_partition_contents(file: &mut File, is_production: bool) -> Resul
     let start_offset = boot_partition_entry.start_sector_lba() as u64 * SECTOR_SIZE;
     let end_offset = (boot_partition_entry.end_sector_lba() as u64 + 1) * SECTOR_SIZE;
 
-    let mut boot_partition_slice = StreamSlice::new(file, start_offset, end_offset)?;
+    let boot_partition_slice = StreamSlice::new(file, start_offset, end_offset)?;
     let fs = FileSystem::new(boot_partition_slice, fatfs::FsOptions::new())
         .context("Failed to open boot partition filesystem")?;
 
@@ -537,7 +535,7 @@ fn verify_system_partition_contents(file: &mut File) -> Result<()> {
     let start_offset = system_partition_entry.start_sector_lba() as u64 * SECTOR_SIZE;
     let end_offset = (system_partition_entry.end_sector_lba() as u64 + 1) * SECTOR_SIZE;
 
-    let mut system_partition_slice = StreamSlice::new(file, start_offset, end_offset)?;
+    let system_partition_slice = StreamSlice::new(file, start_offset, end_offset)?;
     let fs = FileSystem::new(system_partition_slice, fatfs::FsOptions::new())
         .context("Failed to open system partition filesystem")?;
 

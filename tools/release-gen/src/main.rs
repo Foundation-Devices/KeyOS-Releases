@@ -1,6 +1,3 @@
-#[cfg(not(test))]
-use std::io::Seek;
-
 use {
     anyhow::Context,
     clap::Parser,
@@ -19,8 +16,6 @@ mod release_manifest;
 mod test;
 
 const PATH_TO_STR_ERROR: &str = "Path should be a valid string";
-#[cfg(not(test))]
-const COSIGN2_DEFAULT_HEADER_SIZE: u64 = 2048;
 
 /// `release-gen` traverses the two directories and crates a `release.tar` file
 /// that contains the manifest describing what actions to perform to reach the
@@ -56,6 +51,9 @@ pub struct Args {
     /// `updiff` is accessible from CWD.
     #[arg(long, default_value = "updiff")]
     pub updiff_path: PathBuf,
+    /// Overwrite existing output files without prompting.
+    #[arg(long)]
+    pub force: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -80,12 +78,6 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
 
     println!("[INFO] setting up output directory");
 
-    if fs::exists(&args.out).context("Checking if output file exists")? {
-        anyhow::bail!(
-            "Output file {} already exists. Please remove it or specify a different output path.",
-            abs_path(args.out)
-        );
-    }
     let out_dir = if let Some(parent_dir) = args.out.parent() {
         fs::create_dir_all(parent_dir)
             .with_context(|| format!("Creating output dir: {}", abs_path(parent_dir)))?;
@@ -94,13 +86,51 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
         std::env::current_dir().context("Reading current directory")?
     };
 
-    let base_src_root = fs::read_dir(&args.base)
-        .with_context(|| format!("Reading base dir: {}", abs_path(&args.base)))?;
-    let new_src_root = fs::read_dir(&args.new)
-        .with_context(|| format!("Reading new dir: {}", abs_path(&args.new)))?;
-
     let out_patch_dir = out_dir.join("patch");
     let manifest_file_path = out_dir.clone().join("manifest.json");
+
+    // Check if output file or intermediate files exist
+    let out_exists = fs::exists(&args.out).context("Checking if output file exists")?;
+    let patch_exists = fs::exists(&out_patch_dir).context("Checking if patch dir exists")?;
+    let manifest_exists =
+        fs::exists(&manifest_file_path).context("Checking if manifest file exists")?;
+
+    if out_exists || patch_exists || manifest_exists {
+        if !args.force {
+            anyhow::bail!(
+                "Output file {} already exists. Use --force to overwrite.",
+                abs_path(&args.out)
+            );
+        }
+        // Clean up all existing output files
+        if out_exists {
+            fs::remove_file(&args.out).with_context(|| {
+                format!("Removing existing output file: {}", abs_path(&args.out))
+            })?;
+        }
+        if patch_exists {
+            fs::remove_dir_all(&out_patch_dir).with_context(|| {
+                format!("Removing existing patch dir: {}", abs_path(&out_patch_dir))
+            })?;
+        }
+        if manifest_exists {
+            fs::remove_file(&manifest_file_path).with_context(|| {
+                format!(
+                    "Removing existing manifest: {}",
+                    abs_path(&manifest_file_path)
+                )
+            })?;
+        }
+    }
+
+    // Only consider files in the `keyos` folder for updates
+    let base_keyos_dir = args.base.join("keyos");
+    let new_keyos_dir = args.new.join("keyos");
+
+    let base_src_root = fs::read_dir(&base_keyos_dir)
+        .with_context(|| format!("Reading base keyos dir: {}", abs_path(&base_keyos_dir)))?;
+    let new_src_root = fs::read_dir(&new_keyos_dir)
+        .with_context(|| format!("Reading new keyos dir: {}", abs_path(&new_keyos_dir)))?;
 
     fs::create_dir(&out_patch_dir)
         .with_context(|| format!("Creating patch dir: {}", abs_path(&out_patch_dir)))?;
@@ -151,8 +181,6 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
                     .expect("Patch file should have a parent");
                 fs::create_dir_all(patch_file_parent)
                     .with_context(|| format!("Creating dir: {}", abs_path(patch_file_parent)))?;
-                let _ = File::create_new(&patch_file)
-                    .with_context(|| format!("Creating patch file: {}", abs_path(&patch_file)))?;
 
                 let output = Command::new(args.updiff_path.as_os_str())
                     .arg(&args.base_version)
@@ -160,6 +188,7 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
                     .arg(&args.new_version)
                     .arg(new_file_full)
                     .arg(&patch_file)
+                    .arg("--force")
                     .output()
                     .context("Running updiff command")?;
 

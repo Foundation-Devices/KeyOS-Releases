@@ -24,6 +24,7 @@ enum SignerError {
     #[error("Not all files have two signatures")]
     InsufficientSignatures,
 
+    #[allow(dead_code)]
     #[error("Invalid version format: {0}")]
     InvalidVersion(String),
 }
@@ -50,21 +51,23 @@ enum Commands {
         developer: bool,
     },
 
-    /// Create tar file (only when all files have two signatures)
-    CreateTar {
+    /// Create recovery tar file (only when all files have two signatures)
+    CreateRecoveryTar {
         /// Version number (e.g., 1.0.2)
         version: String,
 
-        /// Supply this argument to produce a tar file for the Firmware Recovery mode.
+        /// Supply this argument to produce a Core System Recovery tar file that includes
+        /// the bootloader (boot.cip or boot.bin) and recovery OS (recovery.bin) in addition
+        /// to the standard KeyOS files.
         #[arg(long)]
-        recovery: bool,
+        core_system_recovery: bool,
 
         #[arg(long)]
         allow_one_signature: bool,
     },
 
-    /// Sign the tar file with the provided key
-    SignTar {
+    /// Sign the recovery tar files with the provided key
+    SignRecoveryTars {
         /// Version number (e.g., 1.0.2)
         version: String,
 
@@ -77,9 +80,15 @@ enum Commands {
     Validate {
         /// Version number (e.g., 1.0.2)
         version: String,
-        /// Only check keyos/app.bin and apps; skip manifest and tar presence
+
+        /// Only check individual binary files (app.bin, recovery.bin, apps);
+        /// skip manifest and tar file validation
         #[arg(long)]
         files_only: bool,
+
+        /// Development mode: accept files with only one signature instead of requiring two
+        #[arg(long)]
+        dev: bool,
     },
 }
 
@@ -101,6 +110,18 @@ struct SignatureStatus {
     has_second_signature: bool,
 }
 
+impl SignatureStatus {
+    fn signature_count(&self) -> u8 {
+        if self.has_second_signature {
+            2
+        } else if self.has_first_signature {
+            1
+        } else {
+            0
+        }
+    }
+}
+
 fn main() -> Result<()> {
     env_logger::init();
 
@@ -116,9 +137,9 @@ fn main() -> Result<()> {
             let firmware_version = strip_v_prefix(version);
             sign_files(&version_folder, config_path, &firmware_version, *developer)?;
         }
-        Commands::CreateTar {
+        Commands::CreateRecoveryTar {
             version,
-            recovery,
+            core_system_recovery,
             allow_one_signature,
         } => {
             let version_folder = version.clone();
@@ -126,11 +147,11 @@ fn main() -> Result<()> {
             create_tar(
                 &version_folder,
                 &firmware_version,
-                *recovery,
+                *core_system_recovery,
                 *allow_one_signature,
             )?;
         }
-        Commands::SignTar {
+        Commands::SignRecoveryTars {
             version,
             config_path,
         } => {
@@ -141,10 +162,11 @@ fn main() -> Result<()> {
         Commands::Validate {
             version,
             files_only,
+            dev,
         } => {
             let version_folder = version.clone();
             let firmware_version = strip_v_prefix(version);
-            validate(&version_folder, &firmware_version, *files_only)?;
+            validate(&version_folder, &firmware_version, *files_only, *dev)?;
         }
     }
 
@@ -339,15 +361,19 @@ fn sign_files(
 fn create_tar(
     version_folder: &str,
     firmware_version: &str,
-    is_recovery: bool,
+    is_core_system_recovery: bool,
     allow_one_signature: bool,
 ) -> Result<()> {
+    let tar_type = if is_core_system_recovery {
+        "core system recovery "
+    } else {
+        ""
+    };
     println!(
         "{}",
         format!(
             "Creating {}tar file for version {}",
-            if is_recovery { "recovery " } else { "" },
-            firmware_version
+            tar_type, firmware_version
         )
         .bold()
     );
@@ -370,7 +396,7 @@ fn create_tar(
         unsigned_files.push("keyos/app.bin".to_string());
     }
 
-    // Check recovery.bin
+    // Check recovery.bin (always check, but only include in core system recovery tar)
     let recovery_bin = format!("{}/recovery.bin", version_folder);
     let recovery_status = check_signatures(&recovery_bin)?;
     if !recovery_status.has_second_signature && !allow_one_signature {
@@ -417,15 +443,52 @@ fn create_tar(
     // Generate manifest file
     println!("Generating manifest file...");
 
-    generate_manifest(version_folder, firmware_version)?;
+    generate_manifest(version_folder, firmware_version, is_core_system_recovery)?;
 
     println!("{} Manifest file generated successfully", "✓".green());
 
-    // Create tar file
-    let tar_file = format!("{}/KeyOS-v{}.bin", version_folder, firmware_version);
+    // Create tar file with appropriate naming (v prefix for customer-facing files)
+    let tar_file = if is_core_system_recovery {
+        format!(
+            "{}/KeyOS-v{}-CoreSystemRecovery.tar",
+            version_folder, firmware_version
+        )
+    } else {
+        format!(
+            "{}/KeyOS-v{}-Recovery.tar",
+            version_folder, firmware_version
+        )
+    };
 
     // Collect all files to include in the tar
     let mut files_to_include = Vec::new();
+
+    // For core system recovery, include bootloader and recovery OS
+    if is_core_system_recovery {
+        // Add bootloader - prefer boot.cip if it exists (secure boot mode), otherwise boot.bin
+        // Do NOT rename - the ROM bootloader expects boot.cip in secure boot mode
+        let boot_cip = format!("{}/boot.cip", version_folder);
+        let boot_bin = format!("{}/boot.bin", version_folder);
+
+        if Path::new(&boot_cip).exists() {
+            println!(
+                "{} Including bootloader: boot.cip (secure boot mode)",
+                "→".blue()
+            );
+            files_to_include.push(boot_cip);
+        } else if Path::new(&boot_bin).exists() {
+            println!("{} Including bootloader: boot.bin", "→".blue());
+            files_to_include.push(boot_bin);
+        } else {
+            return Err(SignerError::FileNotFound(
+                "Neither boot.cip nor boot.bin found. At least one is required for core system recovery.".to_string()
+            ).into());
+        }
+
+        // Add recovery.bin
+        println!("{} Including recovery OS: recovery.bin", "→".blue());
+        files_to_include.push(recovery_bin);
+    }
 
     // Add keyos/app.bin
     let app_bin = format!("{}/keyos/app.bin", version_folder);
@@ -510,13 +573,22 @@ fn create_tar(
         return Err(SignerError::FileNotFound(tar_file).into());
     }
 
-    println!("{} Tar file created successfully", "✓".green());
+    println!(
+        "{} Tar file created successfully: {}",
+        "✓".green(),
+        tar_file
+    );
 
     println!(
         "\n{} {}",
         "✓".green().bold(),
         format!(
-            "Tar file creation complete for version {}",
+            "{} creation complete for version {}",
+            if is_core_system_recovery {
+                "Core system recovery tar"
+            } else {
+                "Recovery tar"
+            },
             firmware_version
         )
         .green()
@@ -528,65 +600,118 @@ fn create_tar(
 fn sign_tar(version_folder: &str, config_path: &str, firmware_version: &str) -> Result<()> {
     println!(
         "{}",
-        format!("Signing tar file for version {}", firmware_version).bold()
+        format!(
+            "Signing recovery tar files for version {}",
+            firmware_version
+        )
+        .bold()
     );
 
-    let tar_file = format!("{}/KeyOS-v{}.bin", version_folder, firmware_version);
+    // Sign both recovery tar files
+    let recovery_tar = format!(
+        "{}/KeyOS-v{}-Recovery.tar",
+        version_folder, firmware_version
+    );
+    let core_recovery_tar = format!(
+        "{}/KeyOS-v{}-CoreSystemRecovery.tar",
+        version_folder, firmware_version
+    );
 
-    // Check if tar file exists
-    if !Path::new(&tar_file).exists() {
-        return Err(SignerError::FileNotFound(format!(
-            "Tar file not found: {}. Please run create-tar command first.",
-            tar_file
-        ))
+    let mut signed_count = 0;
+    let mut skipped_count = 0;
+
+    // Sign Recovery.tar if it exists
+    if Path::new(&recovery_tar).exists() {
+        match sign_single_tar(&recovery_tar, config_path, firmware_version)? {
+            true => signed_count += 1,
+            false => skipped_count += 1,
+        }
+    } else {
+        println!(
+            "  {} KeyOS-v{}-Recovery.tar not found, skipping",
+            "⚠".yellow(),
+            firmware_version
+        );
+    }
+
+    // Sign CoreSystemRecovery.tar if it exists
+    if Path::new(&core_recovery_tar).exists() {
+        match sign_single_tar(&core_recovery_tar, config_path, firmware_version)? {
+            true => signed_count += 1,
+            false => skipped_count += 1,
+        }
+    } else {
+        println!(
+            "  {} KeyOS-v{}-CoreSystemRecovery.tar not found, skipping",
+            "⚠".yellow(),
+            firmware_version
+        );
+    }
+
+    if signed_count == 0 && skipped_count == 0 {
+        return Err(SignerError::FileNotFound(
+            "No recovery tar files found. Please run create-recovery-tar command first."
+                .to_string(),
+        )
         .into());
     }
 
-    println!("Checking existing signatures on tar file...");
+    println!(
+        "\n{} {}",
+        "✓".green().bold(),
+        format!(
+            "Tar file signing complete for version {} ({} signed, {} already complete)",
+            firmware_version, signed_count, skipped_count
+        )
+        .green()
+        .bold()
+    );
+    Ok(())
+}
 
-    // Check signature status
-    let signature_status = check_signatures(&tar_file)?;
+/// Sign a single tar file. Returns true if signed, false if already fully signed.
+fn sign_single_tar(tar_file: &str, config_path: &str, firmware_version: &str) -> Result<bool> {
+    let file_name = Path::new(tar_file)
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    println!("\nChecking signatures on {}...", file_name);
+
+    // Check signature status (quiet - we print our own messages)
+    let signature_status = check_signatures_quiet(tar_file)?;
 
     // Sign based on current signature status
     if !signature_status.has_header {
         println!(
-            "{} Tar file has no signature header. Adding first signature...",
-            "ℹ".blue()
+            "  {} {} has no signature header. Adding first signature...",
+            "ℹ".blue(),
+            file_name
         );
     } else if !signature_status.has_first_signature {
         println!(
-            "{} Tar file has a header but no valid signatures. Adding first signature...",
-            "ℹ".blue()
+            "  {} {} has a header but no valid signatures. Adding first signature...",
+            "ℹ".blue(),
+            file_name
         );
     } else if !signature_status.has_second_signature {
         println!(
-            "{} Tar file has one signature. Adding second signature...",
-            "ℹ".blue()
+            "  {} {} has one signature. Adding second signature...",
+            "ℹ".blue(),
+            file_name
         );
     } else {
-        println!(
-            "{} Tar file already has two signatures. No more signatures can be added.",
-            "✓".green()
-        );
-        println!(
-            "{} {}",
-            "✓".green().bold(),
-            "Tar file is already fully signed.".green().bold()
-        );
-        return Ok(());
+        println!("  {} {} already has two signatures", "✓".green(), file_name);
+        return Ok(false);
     }
 
     // Sign the tar file
-    println!(
-        "Signing tar file: {}...",
-        Path::new(&tar_file).file_name().unwrap().to_string_lossy()
-    );
-
     let output = Command::new("cosign2")
         .args([
             "sign",
             "-i",
-            &tar_file,
+            tar_file,
             "-c",
             config_path,
             "--in-place",
@@ -594,32 +719,41 @@ fn sign_tar(version_folder: &str, config_path: &str, firmware_version: &str) -> 
             firmware_version,
         ])
         .output()
-        .context("Failed to execute cosign2 command for tar file")?;
+        .context(format!(
+            "Failed to execute cosign2 command for {}",
+            file_name
+        ))?;
 
     if !output.status.success() {
-        println!("{} Failed to sign tar file", "✗".red());
+        println!("  {} Failed to sign {}", "✗".red(), file_name);
         return Err(SignerError::CommandFailed(
             String::from_utf8_lossy(&output.stderr).to_string(),
         )
         .into());
     }
 
-    println!("{} Tar file signed successfully", "✓".green());
-
-    println!(
-        "\n{} {}",
-        "✓".green().bold(),
-        format!("Tar file signing complete for version {}", firmware_version)
-            .green()
-            .bold()
-    );
-    Ok(())
+    println!("  {} {} signed successfully", "✓".green(), file_name);
+    Ok(true)
 }
 
-fn validate(version_folder: &str, firmware_version: &str, files_only: bool) -> Result<()> {
+fn validate(
+    version_folder: &str,
+    firmware_version: &str,
+    files_only: bool,
+    dev_mode: bool,
+) -> Result<()> {
+    let mode_str = if dev_mode {
+        " (dev mode - 1 signature)"
+    } else {
+        " (production - 2 signatures)"
+    };
     println!(
         "{}",
-        format!("Validating signatures for version {}", firmware_version).bold()
+        format!(
+            "Validating signatures for version {}{}",
+            firmware_version, mode_str
+        )
+        .bold()
     );
 
     // Check if version folder exists
@@ -628,57 +762,90 @@ fn validate(version_folder: &str, firmware_version: &str, files_only: bool) -> R
         return Err(SignerError::DirectoryNotFound(version_folder.to_string()).into());
     }
 
-    println!("Checking required files and signatures...");
+    println!("Checking required files and signatures...\n");
 
     let mut all_valid = true;
     let mut missing_files = Vec::new();
-    let mut unsigned_files = Vec::new();
+    let mut insufficient_sigs = Vec::new();
+    let required_sigs = if dev_mode { 1 } else { 2 };
 
-    // Check keyos/app.bin
-    let app_bin = format!("{}/keyos/app.bin", version_folder);
-    if !Path::new(&app_bin).exists() {
-        println!("  {} keyos/app.bin is missing", "✗".red());
-        missing_files.push("keyos/app.bin".to_string());
-        all_valid = false;
-    } else {
-        let app_status = check_signatures(&app_bin)?;
-        if !app_status.has_second_signature {
-            unsigned_files.push("keyos/app.bin".to_string());
-            all_valid = false;
+    // Helper to check if signature count meets requirement
+    let check_sig_requirement = |status: &SignatureStatus| -> bool {
+        if dev_mode {
+            status.has_first_signature
+        } else {
+            status.has_second_signature
         }
+    };
+
+    // === Bootloader (boot.cip or boot.bin) ===
+    // Bootloader doesn't use cosign2, just check existence
+    let boot_cip = format!("{}/boot.cip", version_folder);
+    let boot_bin = format!("{}/boot.bin", version_folder);
+    if Path::new(&boot_cip).exists() {
+        println!("  {} boot.cip (secure boot mode)", "✓".green());
+    } else if Path::new(&boot_bin).exists() {
+        println!("  {} boot.bin", "✓".green());
+    } else {
+        println!(
+            "  {} bootloader (boot.cip or boot.bin) is missing",
+            "✗".red()
+        );
+        missing_files.push("boot.cip or boot.bin".to_string());
+        all_valid = false;
     }
 
-    // Check recovery.bin
+    // === Recovery OS (recovery.bin) ===
     let recovery_bin = format!("{}/recovery.bin", version_folder);
     if !Path::new(&recovery_bin).exists() {
         println!("  {} recovery.bin is missing", "✗".red());
         missing_files.push("recovery.bin".to_string());
         all_valid = false;
     } else {
-        let recovery_status = check_signatures(&recovery_bin)?;
-        if !recovery_status.has_second_signature {
-            unsigned_files.push("recovery.bin".to_string());
+        let recovery_status = check_signatures_quiet(&recovery_bin)?;
+        if check_sig_requirement(&recovery_status) {
+            println!("  {} recovery.bin", "✓".green());
+        } else {
+            println!(
+                "  {} recovery.bin ({} of {} signatures)",
+                "✗".red(),
+                recovery_status.signature_count(),
+                required_sigs
+            );
+            insufficient_sigs.push("recovery.bin".to_string());
             all_valid = false;
         }
     }
 
-    if !files_only {
-        // Check manifest.json
-        let manifest_file = format!("{}/manifest.json", version_folder);
-        if !Path::new(&manifest_file).exists() {
-            println!("  {} manifest.json is missing", "✗".red());
-            missing_files.push("manifest.json".to_string());
+    // === KeyOS (keyos/app.bin) ===
+    let app_bin = format!("{}/keyos/app.bin", version_folder);
+    if !Path::new(&app_bin).exists() {
+        println!("  {} keyos/app.bin is missing", "✗".red());
+        missing_files.push("keyos/app.bin".to_string());
+        all_valid = false;
+    } else {
+        let app_status = check_signatures_quiet(&app_bin)?;
+        if check_sig_requirement(&app_status) {
+            println!("  {} keyos/app.bin", "✓".green());
+        } else {
+            println!(
+                "  {} keyos/app.bin ({} of {} signatures)",
+                "✗".red(),
+                app_status.signature_count(),
+                required_sigs
+            );
+            insufficient_sigs.push("keyos/app.bin".to_string());
             all_valid = false;
         }
     }
 
-    // Check all app files
+    // === Apps (keyos/apps/{app_name}/app.elf) ===
     let apps_dir = format!("{}/keyos/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
 
     if !apps_path.is_dir() {
-        println!("  {} apps directory is missing", "✗".red());
-        missing_files.push("apps/".to_string());
+        println!("  {} keyos/apps/ directory is missing", "✗".red());
+        missing_files.push("keyos/apps/".to_string());
         all_valid = false;
     } else {
         let mut app_count = 0;
@@ -687,15 +854,51 @@ fn validate(version_folder: &str, firmware_version: &str, files_only: bool) -> R
             let entry = entry.context("Failed to read directory entry")?;
             let path = entry.path();
 
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "elf") {
-                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                    if file_name.starts_with("gui-app") {
-                        app_count += 1;
-                        let app_path = path.to_str().unwrap();
-                        let app_status = check_signatures(app_path)?;
-                        if !app_status.has_second_signature {
-                            unsigned_files.push(format!("apps/{}", file_name));
+            // Apps are in subdirectories: keyos/apps/{app_name}/app.elf
+            if path.is_dir() {
+                let app_name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+                let elf_path = path.join("app.elf");
+                let manifest_path = path.join("manifest.json");
+
+                if elf_path.exists() {
+                    app_count += 1;
+                    let elf_path_str = elf_path.to_string_lossy();
+                    let app_status = check_signatures_quiet(&elf_path_str)?;
+
+                    let has_manifest = manifest_path.exists();
+                    let manifest_status = if has_manifest {
+                        ""
+                    } else {
+                        " (missing manifest.json)"
+                    };
+
+                    if check_sig_requirement(&app_status) {
+                        println!(
+                            "  {} keyos/apps/{}/app.elf{}",
+                            "✓".green(),
+                            app_name,
+                            manifest_status
+                        );
+                        if !has_manifest {
+                            missing_files.push(format!("keyos/apps/{}/manifest.json", app_name));
                             all_valid = false;
+                        }
+                    } else {
+                        println!(
+                            "  {} keyos/apps/{}/app.elf ({} of {} signatures){}",
+                            "✗".red(),
+                            app_name,
+                            app_status.signature_count(),
+                            required_sigs,
+                            manifest_status
+                        );
+                        insufficient_sigs.push(format!("keyos/apps/{}/app.elf", app_name));
+                        all_valid = false;
+                        if !has_manifest {
+                            missing_files.push(format!("keyos/apps/{}/manifest.json", app_name));
                         }
                     }
                 }
@@ -703,49 +906,131 @@ fn validate(version_folder: &str, firmware_version: &str, files_only: bool) -> R
         }
 
         if app_count == 0 {
-            println!("  {} No app files found in apps directory", "⚠".yellow());
+            println!("  {} No apps found in keyos/apps/", "⚠".yellow());
         }
     }
 
+    // === Artifacts (only checked when not --files-only) ===
     if !files_only {
-        // Check KeyOS tar file
-        let tar_file = format!("{}/KeyOS-v{}.bin", version_folder, firmware_version);
-        if !Path::new(&tar_file).exists() {
-            println!("  {} KeyOS-v{}.bin is missing", "✗".red(), firmware_version);
-            missing_files.push(format!("KeyOS-v{}.bin", firmware_version));
-            all_valid = false;
+        println!("\nChecking release artifacts...\n");
+
+        // Check manifest.json
+        let manifest_file = format!("{}/manifest.json", version_folder);
+        if Path::new(&manifest_file).exists() {
+            println!("  {} manifest.json", "✓".green());
         } else {
-            let tar_status = check_signatures(&tar_file)?;
-            if !tar_status.has_second_signature {
-                unsigned_files.push(format!("KeyOS-v{}.bin", firmware_version));
+            println!("  {} manifest.json is missing", "✗".red());
+            missing_files.push("manifest.json".to_string());
+            all_valid = false;
+        }
+
+        // Check Recovery tar: KeyOS-v{version}-Recovery.tar
+        let recovery_tar = format!(
+            "{}/KeyOS-v{}-Recovery.tar",
+            version_folder, firmware_version
+        );
+        if Path::new(&recovery_tar).exists() {
+            let tar_status = check_signatures_quiet(&recovery_tar)?;
+            if check_sig_requirement(&tar_status) {
+                println!("  {} KeyOS-v{}-Recovery.tar", "✓".green(), firmware_version);
+            } else {
+                println!(
+                    "  {} KeyOS-v{}-Recovery.tar ({} of {} signatures)",
+                    "✗".red(),
+                    firmware_version,
+                    tar_status.signature_count(),
+                    required_sigs
+                );
+                insufficient_sigs.push(format!("KeyOS-v{}-Recovery.tar", firmware_version));
                 all_valid = false;
             }
+        } else {
+            println!(
+                "  {} KeyOS-v{}-Recovery.tar is missing",
+                "⚠".yellow(),
+                firmware_version
+            );
+            // Not a hard failure - might not have been created yet
+        }
+
+        // Check Core System Recovery tar: KeyOS-v{version}-CoreSystemRecovery.tar
+        let core_recovery_tar = format!(
+            "{}/KeyOS-v{}-CoreSystemRecovery.tar",
+            version_folder, firmware_version
+        );
+        if Path::new(&core_recovery_tar).exists() {
+            let tar_status = check_signatures_quiet(&core_recovery_tar)?;
+            if check_sig_requirement(&tar_status) {
+                println!(
+                    "  {} KeyOS-v{}-CoreSystemRecovery.tar",
+                    "✓".green(),
+                    firmware_version
+                );
+            } else {
+                println!(
+                    "  {} KeyOS-v{}-CoreSystemRecovery.tar ({} of {} signatures)",
+                    "✗".red(),
+                    firmware_version,
+                    tar_status.signature_count(),
+                    required_sigs
+                );
+                insufficient_sigs.push(format!(
+                    "KeyOS-v{}-CoreSystemRecovery.tar",
+                    firmware_version
+                ));
+                all_valid = false;
+            }
+        } else {
+            println!(
+                "  {} KeyOS-v{}-CoreSystemRecovery.tar is missing",
+                "⚠".yellow(),
+                firmware_version
+            );
+            // Not a hard failure - might not have been created yet
+        }
+
+        // Check Factory image: KeyOS-v{version}-Factory.img
+        let factory_img = format!("{}/KeyOS-v{}-Factory.img", version_folder, firmware_version);
+        if Path::new(&factory_img).exists() {
+            println!("  {} KeyOS-v{}-Factory.img", "✓".green(), firmware_version);
+        } else {
+            println!(
+                "  {} KeyOS-v{}-Factory.img is missing",
+                "⚠".yellow(),
+                firmware_version
+            );
+            // Not a hard failure - might not have been created yet
         }
     }
 
     // Print summary
-    println!("\nValidation Summary:");
+    println!("\n{}", "Validation Summary:".bold());
 
     if !missing_files.is_empty() {
-        println!("{} Missing files:", "✗".red());
-        for file in missing_files {
+        println!("\n{} Missing required files:", "✗".red());
+        for file in &missing_files {
             println!("  - {}", file);
         }
     }
 
-    if !unsigned_files.is_empty() {
-        println!("{} Files without two signatures:", "✗".red());
-        for file in unsigned_files {
+    if !insufficient_sigs.is_empty() {
+        println!(
+            "\n{} Files with insufficient signatures (need {}):",
+            "✗".red(),
+            required_sigs
+        );
+        for file in &insufficient_sigs {
             println!("  - {}", file);
         }
     }
 
     if all_valid {
-        println!(
-            "\n{} {}",
-            "✓".green().bold(),
-            "All files exist and have two signatures.".green().bold()
-        );
+        let sig_msg = if dev_mode {
+            "All required files exist and have at least one signature."
+        } else {
+            "All required files exist and have two signatures."
+        };
+        println!("\n{} {}", "✓".green().bold(), sig_msg.green().bold());
     } else {
         println!(
             "\n{} {}",
@@ -759,6 +1044,14 @@ fn validate(version_folder: &str, firmware_version: &str, files_only: bool) -> R
 }
 
 fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
+    check_signatures_impl(file_path, true)
+}
+
+fn check_signatures_quiet(file_path: &str) -> Result<SignatureStatus> {
+    check_signatures_impl(file_path, false)
+}
+
+fn check_signatures_impl(file_path: &str, verbose: bool) -> Result<SignatureStatus> {
     // Run cosign2 dump and capture output
     let output = Command::new("cosign2")
         .args(["dump", "--input", file_path])
@@ -773,7 +1066,9 @@ fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
         || stderr.contains("no header found")
         || stdout.contains("no header found")
     {
-        println!("  {} {} has no signatures", "✗".red(), file_path);
+        if verbose {
+            println!("  {} {} has no signatures", "✗".red(), file_path);
+        }
         return Ok(SignatureStatus {
             has_header: false,
             has_first_signature: false,
@@ -784,7 +1079,9 @@ fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
     // Check for zero signatures in signature2
     let re_sig2 = Regex::new(r"signature2.*0{64}")?;
     if re_sig2.is_match(&stdout) {
-        println!("  {} {} has only one signature", "⚠".yellow(), file_path);
+        if verbose {
+            println!("  {} {} has only one signature", "⚠".yellow(), file_path);
+        }
         return Ok(SignatureStatus {
             has_header: true,
             has_first_signature: true,
@@ -795,11 +1092,13 @@ fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
     // Check for zero signatures in signature1
     let re_sig1 = Regex::new(r"signature1.*0{64}")?;
     if re_sig1.is_match(&stdout) {
-        println!(
-            "  {} {} has a header but no valid signatures",
-            "✗".red(),
-            file_path
-        );
+        if verbose {
+            println!(
+                "  {} {} has a header but no valid signatures",
+                "✗".red(),
+                file_path
+            );
+        }
         return Ok(SignatureStatus {
             has_header: true,
             has_first_signature: false,
@@ -808,7 +1107,9 @@ fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
     }
 
     // If we get here, the file has two signatures
-    println!("  {} {} has two signatures", "✓".green(), file_path);
+    if verbose {
+        println!("  {} {} has two signatures", "✓".green(), file_path);
+    }
     Ok(SignatureStatus {
         has_header: true,
         has_first_signature: true,
@@ -816,7 +1117,11 @@ fn check_signatures(file_path: &str) -> Result<SignatureStatus> {
     })
 }
 
-fn generate_manifest(version_folder: &str, firmware_version: &str) -> Result<()> {
+fn generate_manifest(
+    version_folder: &str,
+    firmware_version: &str,
+    is_core_system_recovery: bool,
+) -> Result<()> {
     // Manifest file generation is handled by the progress bar in the calling function
     let manifest_file = format!("{}/manifest.json", version_folder);
 
@@ -825,6 +1130,37 @@ fn generate_manifest(version_folder: &str, firmware_version: &str) -> Result<()>
         version: format!("v{}", firmware_version),
         files: Vec::new(),
     };
+
+    // For core system recovery, include bootloader and recovery OS
+    if is_core_system_recovery {
+        // Add bootloader - prefer boot.cip if it exists (secure boot mode), otherwise boot.bin
+        let boot_cip = format!("{}/boot.cip", version_folder);
+        let boot_bin = format!("{}/boot.bin", version_folder);
+
+        if Path::new(&boot_cip).exists() {
+            let boot_hash = calculate_hash(&boot_cip)?;
+            manifest.files.push(FileEntry {
+                name: "boot.cip".to_string(),
+                hash: format!("0x{}", boot_hash),
+            });
+        } else if Path::new(&boot_bin).exists() {
+            let boot_hash = calculate_hash(&boot_bin)?;
+            manifest.files.push(FileEntry {
+                name: "boot.bin".to_string(),
+                hash: format!("0x{}", boot_hash),
+            });
+        }
+
+        // Add recovery.bin
+        let recovery_bin = format!("{}/recovery.bin", version_folder);
+        if Path::new(&recovery_bin).exists() {
+            let recovery_hash = calculate_hash(&recovery_bin)?;
+            manifest.files.push(FileEntry {
+                name: "recovery.bin".to_string(),
+                hash: format!("0x{}", recovery_hash),
+            });
+        }
+    }
 
     // Add keyos/app.bin to manifest
     let app_bin = format!("{}/keyos/app.bin", version_folder);
@@ -838,25 +1174,29 @@ fn generate_manifest(version_folder: &str, firmware_version: &str) -> Result<()>
     let apps_dir = format!("{}/keyos/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
 
-    let mut app_count = 0;
+    let mut _app_count = 0;
     if apps_path.is_dir() {
         for entry in fs::read_dir(apps_path).context("Failed to read apps directory")? {
             let entry = entry.context("Failed to read directory entry")?;
             let path = entry.path();
 
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "elf") {
-                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                    if file_name.starts_with("gui-app") {
-                        let app_path = path.to_str().unwrap();
-                        let app_hash = calculate_hash(app_path)?;
+            // Apps are in subdirectories: keyos/apps/{app_name}/app.elf
+            if path.is_dir() {
+                let app_name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+                let elf_path = path.join("app.elf");
 
-                        manifest.files.push(FileEntry {
-                            name: format!("apps/{}", file_name),
-                            hash: format!("0x{}", app_hash),
-                        });
+                if elf_path.exists() {
+                    let app_hash = calculate_hash(elf_path.to_str().unwrap())?;
 
-                        app_count += 1;
-                    }
+                    manifest.files.push(FileEntry {
+                        name: format!("apps/{}/app.elf", app_name),
+                        hash: format!("0x{}", app_hash),
+                    });
+
+                    _app_count += 1;
                 }
             }
         }
