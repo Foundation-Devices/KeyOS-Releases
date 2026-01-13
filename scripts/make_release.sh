@@ -108,6 +108,8 @@ elif [ "$#" -ge 4 ] && [ "$4" = "--reboot-required" ]; then
 fi
 
 START_DIR=$(pwd)
+OUTPUT_ROOT_DIR="updates"
+mkdir -p "$OUTPUT_ROOT_DIR"
 
 info "checking required directories and tools"
 
@@ -145,6 +147,9 @@ fi
 OLD_VERSION=${OLD_VERSION_DIR##*/}
 NEW_VERSION=${NEW_VERSION_DIR##*/}
 
+UPDATE_DIR="$OUTPUT_ROOT_DIR/${OLD_VERSION}-${NEW_VERSION}"
+mkdir -p "$UPDATE_DIR"
+
 # Strip the 'v'.
 OLD_VERSION_NO_V=${OLD_VERSION#v}
 NEW_VERSION_NO_V=${NEW_VERSION#v}
@@ -175,10 +180,10 @@ SIGNED_SHA256=$(sha256sum ./release.tar | awk '{print $1}')
 
 info "generating @manifest.json"
 RELEASE_DATE=$(date +%Y-%m-%d)
-UPDATE_FILENAME="release-${OLD_VERSION}-${NEW_VERSION}.tar"
-SIGNATURE_FILENAME="release-${OLD_VERSION}-${NEW_VERSION}.tar.sig"
+UPDATE_FILENAME="release.tar"
+SIGNATURE_FILENAME="release.tar.sig"
 
-cat > "manifest-${OLD_VERSION}-${NEW_VERSION}.json" <<EOF
+cat > "$UPDATE_DIR/manifest.json" <<EOF
 {
 	"baseVersion": "${OLD_VERSION_NO_V}",
 	"version": "${NEW_VERSION_NO_V}",
@@ -204,11 +209,14 @@ cargo xtask build-firmware-image
 cd "$START_DIR"
 
 # Then copy the image over.
-cp "$KEYOS_DIR/boot.img" "boot-$OLD_VERSION-$NEW_VERSION.img"
+cp "$KEYOS_DIR/boot.img" "$UPDATE_DIR/boot.img"
 
 info "compressing 'boot.img'"
-gzip -c "boot-$OLD_VERSION-$NEW_VERSION.img" > "boot-$OLD_VERSION-$NEW_VERSION.img.gz"
+gzip -c "$UPDATE_DIR/boot.img" > "$UPDATE_DIR/boot.img.gz"
 
-mv release.tar "release-$OLD_VERSION-$NEW_VERSION.tar"
+if [ -f release.tar.sig ]; then
+    mv release.tar.sig "$UPDATE_DIR/release.tar.sig"
+fi
+mv release.tar "$UPDATE_DIR/release.tar"
 
 info "done"
