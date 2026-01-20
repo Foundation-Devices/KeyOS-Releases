@@ -43,6 +43,7 @@ fn release_roundtrip() {
         reboot_required: false,
         out: out_path.clone(),
         updiff_path,
+        force: true,
     };
 
     let _cleanup_guard = CleanupGuard;

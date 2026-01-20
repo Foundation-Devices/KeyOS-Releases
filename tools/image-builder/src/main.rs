@@ -8,19 +8,13 @@ use mbrs::{AddrScheme, Mbr, PartInfo, PartType};
 use sha2::Digest;
 use std::fs::{self, File};
 use std::io::{Seek, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 enum ImageBuilderError {
     #[error("File not found: {0}")]
     FileNotFound(String),
-
-    #[error("Directory not found: {0}")]
-    DirectoryNotFound(String),
-
-    #[error("Failed to create image: {0}")]
-    ImageCreationFailed(String),
 }
 
 #[derive(Parser)]
@@ -63,20 +57,18 @@ const SYSTEM_VOLUME_NAME: &[u8] = b"PRIME      ";
 
 const SECTOR_SIZE: u64 = 512;
 const BOOT_PARTITION_START_SECTOR: u32 = 1;
-const BOOT_PARTITION_SIZE_BYTES: u64 = 32 * MIB - SECTOR_SIZE;
+const BOOT_PARTITION_SIZE_BYTES: u64 = 256 * MIB - SECTOR_SIZE;
 const BOOT_PARTITION_SIZE_SECTORS: u32 = (BOOT_PARTITION_SIZE_BYTES / SECTOR_SIZE) as u32;
 
 const SYSTEM_PARTITION_START_SECTOR: u32 =
     BOOT_PARTITION_START_SECTOR + BOOT_PARTITION_SIZE_SECTORS;
-const SYSTEM_PARTITION_SIZE_BYTES: u64 = 10 * GIB - 0xd90000;
+const SYSTEM_PARTITION_SIZE_BYTES: u64 = 8 * GIB - 0x1000000;
 const SYSTEM_PARTITION_SIZE_SECTORS: u32 = (SYSTEM_PARTITION_SIZE_BYTES / SECTOR_SIZE) as u32;
 
-// Simplified for our use case - we'll focus on the essential partitions
-const TOTAL_FLASH_BLOCKS: u64 = 64 * GIB / SECTOR_SIZE; // Assume 64GB device
-const USER_PARTITION_SIZE_BYTES: u64 = 45 * GIB - 0x500000;
-const USER_PARTITION_SIZE_SECTORS: u32 = (USER_PARTITION_SIZE_BYTES / SECTOR_SIZE) as u32;
 const USER_PARTITION_START_SECTOR: u32 =
-    TOTAL_FLASH_BLOCKS as u32 - (USER_PARTITION_SIZE_BYTES / SECTOR_SIZE) as u32;
+    SYSTEM_PARTITION_START_SECTOR + SYSTEM_PARTITION_SIZE_SECTORS;
+const USER_PARTITION_SIZE_BYTES: u64 = 50 * GIB - 0x400000;
+const USER_PARTITION_SIZE_SECTORS: u32 = (USER_PARTITION_SIZE_BYTES / SECTOR_SIZE) as u32;
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -105,19 +97,21 @@ fn strip_v_prefix(version: &str) -> String {
     }
 }
 
-fn check_images_exist(version_folder: &str, is_production: bool) -> Result<()> {
-    let bootloader_ext = if is_production { "cip" } else { "bin" };
-    let boot_bin = format!("{version_folder}/boot.{bootloader_ext}");
+fn check_images_exist(version_folder: &str, _is_production: bool) -> Result<()> {
+    // Check for bootloader: prefer boot.cip if it exists, otherwise boot.bin
+    let boot_cip = format!("{version_folder}/boot.cip");
+    let boot_bin = format!("{version_folder}/boot.bin");
     let blassets = format!("{version_folder}/blassets");
-    let common = format!("{version_folder}/common");
+    let common = format!("{version_folder}/keyos/common");
     let common_boot = format!("{version_folder}/common-boot");
 
-    let app_bin = format!("{version_folder}/app.bin");
+    let app_bin = format!("{version_folder}/keyos/app.bin");
     let recovery_bin = format!("{version_folder}/recovery.bin");
 
-    if !Path::new(&boot_bin).exists() {
+    // Check for bootloader file (prefer boot.cip, fallback to boot.bin)
+    if !Path::new(&boot_cip).exists() && !Path::new(&boot_bin).exists() {
         return Err(ImageBuilderError::FileNotFound(format!(
-            "boot.{bootloader_ext} not found in {version_folder}. This file is required to boot KeyOS.",
+            "Neither boot.cip nor boot.bin found in {version_folder}. At least one is required to boot KeyOS.",
         ))
         .into());
     }
@@ -130,7 +124,7 @@ fn check_images_exist(version_folder: &str, is_production: bool) -> Result<()> {
 
     if !Path::new(&common).exists() {
         return Err(ImageBuilderError::FileNotFound(format!(
-            "`common` not found in {version_folder}. This folder is required to boot KeyOS.",
+            "`keyos/common` not found in {version_folder}. This folder is required to boot KeyOS.",
         ))
         .into());
     }
@@ -144,7 +138,7 @@ fn check_images_exist(version_folder: &str, is_production: bool) -> Result<()> {
 
     if !Path::new(&app_bin).exists() {
         return Err(ImageBuilderError::FileNotFound(format!(
-            "app.bin not found in {version_folder}. This file should be signed first.",
+            "keyos/app.bin not found in {version_folder}. This file should be signed first.",
         ))
         .into());
     }
@@ -234,7 +228,11 @@ fn format_partition<'a>(
     FileSystem::new(boot_partition, fatfs::FsOptions::new()).context("open filesystem")
 }
 
-fn create_boot_partition(file: &mut File, version_folder: &str, is_production: bool) -> Result<()> {
+fn create_boot_partition(
+    file: &mut File,
+    version_folder: &str,
+    _is_production: bool,
+) -> Result<()> {
     println!("{}", "Creating boot partition...".bold());
 
     let fs = format_partition(
@@ -247,16 +245,25 @@ fn create_boot_partition(file: &mut File, version_folder: &str, is_production: b
     )
     .context("formatting boot partition")?;
 
-    // Copy bootloader
-    let bootloader_ext = if is_production { "cip" } else { "bin" };
-    let boot_bin_path = format!("{}/boot.{bootloader_ext}", version_folder);
+    // Copy bootloader - prefer boot.cip if it exists, otherwise boot.bin
+    // Do NOT rename - the ROM bootloader expects boot.cip in secure boot mode
+    let boot_cip_path = format!("{}/boot.cip", version_folder);
+    let boot_bin_path = format!("{}/boot.bin", version_folder);
+
+    let (bootloader_src, bootloader_dst) = if Path::new(&boot_cip_path).exists() {
+        (boot_cip_path, "boot.cip")
+    } else {
+        (boot_bin_path, "boot.bin")
+    };
+
     println!(
-        "  {} Copying boot.{bootloader_ext} to boot partition",
-        "→".blue()
+        "  {} Copying {} to boot partition",
+        "→".blue(),
+        bootloader_dst
     );
     fs.root_dir()
-        .create_file("boot.bin")?
-        .write_all(&fs::read(&boot_bin_path)?)?;
+        .create_file(bootloader_dst)?
+        .write_all(&std::fs::read(&bootloader_src)?)?;
 
     // Copy recovery.bin
     let recovery_bin_path = format!("{}/recovery.bin", version_folder);
@@ -338,18 +345,21 @@ fn create_system_partition(file: &mut File, version_folder: &str) -> Result<()> 
         SYSTEM_PARTITION_SIZE_SECTORS,
     )?;
 
-    // Copy app.bin (main firmware)
-    let app_bin_path = format!("{}/app.bin", version_folder);
-    println!("  {} Copying app.bin to system partition", "→".blue());
-    fs.root_dir()
+    // Create keyos directory and copy app.bin (main firmware)
+    println!("  {} Creating keyos directory", "→".blue());
+    let mut keyos_dir = fs.root_dir().create_dir("keyos")?;
+
+    let app_bin_path = format!("{}/keyos/app.bin", version_folder);
+    println!("  {} Copying keyos/app.bin to system partition", "→".blue());
+    keyos_dir
         .create_file("app.bin")?
         .write_all(&fs::read(&app_bin_path)?)?;
 
-    // Copy apps directory if it exists
-    let apps_dir_path = format!("{}/apps", version_folder);
+    // Copy apps directory if it exists (from keyos/apps to keyos/apps on disk)
+    let apps_dir_path = format!("{}/keyos/apps", version_folder);
     if Path::new(&apps_dir_path).exists() {
         println!("  {} Copying apps directory", "→".blue());
-        let apps_dir_disk = fs.root_dir().create_dir("apps")?;
+        let apps_dir_disk = keyos_dir.create_dir("apps")?;
 
         for entry in fs::read_dir(&apps_dir_path)? {
             let app_dir = entry?;
@@ -374,11 +384,12 @@ fn create_system_partition(file: &mut File, version_folder: &str) -> Result<()> 
         println!("  {} No apps directory found", "⚠".yellow());
     }
 
+    // Copy common assets (from keyos/common to keyos/common on disk)
     copy_directory_to_disk(
-        &mut fs.root_dir(),
+        &mut keyos_dir,
         version_folder,
         "common assets",
-        "common",
+        "keyos/common",
         "common",
     )?;
 
@@ -399,6 +410,139 @@ fn create_user_partition(file: &mut File) -> Result<()> {
     file.write_all(&buf)?;
 
     println!("{} User partition created successfully", "✓".green());
+    Ok(())
+}
+
+fn log_all_partitions(file: &mut File) -> Result<()> {
+    println!("\n{}", "Partition Table Summary:".bold());
+
+    file.seek(std::io::SeekFrom::Start(0))?;
+    let mbr = Mbr::try_from_reader(&*file).context("Failed to read MBR")?;
+
+    for (idx, entry) in mbr.partition_table.entries.iter().enumerate() {
+        if let Some(part) = entry {
+            let start_sector = part.start_sector_lba();
+            let end_sector = part.end_sector_lba();
+            let size_sectors = end_sector - start_sector + 1;
+            let size_mb = (size_sectors as u64 * SECTOR_SIZE) / MIB;
+            let bootable = if part.bootable() {
+                "bootable"
+            } else {
+                "non-bootable"
+            };
+
+            println!(
+                "  {} Partition #{}: {} sectors ({} MB), start: {}, end: {}, {}",
+                "→".blue(),
+                idx,
+                size_sectors,
+                size_mb,
+                start_sector,
+                end_sector,
+                bootable
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn list_directory_contents(
+    dir: &Dir<StreamSlice<&mut File>>,
+    _descend_into_folders: bool,
+) -> Result<()> {
+    list_directory_contents_recursive(dir, 1)
+}
+
+fn list_directory_contents_recursive(
+    dir: &Dir<StreamSlice<&mut File>>,
+    depth: usize,
+) -> Result<()> {
+    let indent = "  ".repeat(depth + 1);
+
+    for entry in dir.iter() {
+        let entry = entry?;
+        let name = entry.file_name();
+
+        // Skip . and .. entries
+        if name == "." || name == ".." {
+            continue;
+        }
+
+        if entry.is_dir() {
+            println!("{}📁 {}/", indent, name);
+
+            // Recursively list subdirectory contents
+            let subdir = entry.to_dir();
+            list_directory_contents_recursive(&subdir, depth + 1)?;
+        } else {
+            let size = entry.len();
+            println!("{}📄 {} ({} bytes)", indent, name, size);
+        }
+    }
+
+    Ok(())
+}
+
+fn verify_boot_partition_contents(file: &mut File, _is_production: bool) -> Result<()> {
+    println!("\n{}", "Verifying boot partition contents...".bold());
+
+    file.seek(std::io::SeekFrom::Start(0))?;
+    let mbr = Mbr::try_from_reader(&*file).context("Failed to read MBR")?;
+
+    let boot_partition_entry = mbr.partition_table.entries[0]
+        .ok_or_else(|| anyhow::anyhow!("Boot partition not found"))?;
+    let start_offset = boot_partition_entry.start_sector_lba() as u64 * SECTOR_SIZE;
+    let end_offset = (boot_partition_entry.end_sector_lba() as u64 + 1) * SECTOR_SIZE;
+
+    let boot_partition_slice = StreamSlice::new(file, start_offset, end_offset)?;
+    let fs = FileSystem::new(boot_partition_slice, fatfs::FsOptions::new())
+        .context("Failed to open boot partition filesystem")?;
+
+    println!("  {} Root contents of boot partition:", "→".blue());
+    let mut found_bootloader = false;
+
+    list_directory_contents(&fs.root_dir(), false)?;
+
+    // Check for bootloader file (boot.cip in secure boot mode, boot.bin otherwise)
+    for entry in fs.root_dir().iter() {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name.eq_ignore_ascii_case("boot.cip") || name.eq_ignore_ascii_case("boot.bin") {
+            found_bootloader = true;
+            break;
+        }
+    }
+
+    if !found_bootloader {
+        return Err(anyhow::anyhow!(
+            "Expected bootloader file (boot.cip or boot.bin) not found in boot partition!"
+        ));
+    }
+
+    println!("{} Boot partition verification successful", "✓".green());
+    Ok(())
+}
+
+fn verify_system_partition_contents(file: &mut File) -> Result<()> {
+    println!("\n{}", "Verifying system partition contents...".bold());
+
+    file.seek(std::io::SeekFrom::Start(0))?;
+    let mbr = Mbr::try_from_reader(&*file).context("Failed to read MBR")?;
+
+    let system_partition_entry = mbr.partition_table.entries[1]
+        .ok_or_else(|| anyhow::anyhow!("System partition not found"))?;
+    let start_offset = system_partition_entry.start_sector_lba() as u64 * SECTOR_SIZE;
+    let end_offset = (system_partition_entry.end_sector_lba() as u64 + 1) * SECTOR_SIZE;
+
+    let system_partition_slice = StreamSlice::new(file, start_offset, end_offset)?;
+    let fs = FileSystem::new(system_partition_slice, fatfs::FsOptions::new())
+        .context("Failed to open system partition filesystem")?;
+
+    println!("  {} Root contents of system partition:", "→".blue());
+    list_directory_contents(&fs.root_dir(), true)?;
+
+    println!("{} System partition verification successful", "✓".green());
     Ok(())
 }
 
@@ -435,6 +579,17 @@ fn create_boot_image(version_folder: &str, is_production: bool, output_file: &st
     create_system_partition(&mut boot_image, version_folder)
         .context("Failed to create system partition")?;
     create_user_partition(&mut boot_image).context("Failed to create user partition")?;
+
+    // Log all partitions
+    log_all_partitions(&mut boot_image).context("Failed to log partitions")?;
+
+    // Verify the boot partition contents
+    verify_boot_partition_contents(&mut boot_image, is_production)
+        .context("Boot partition verification failed")?;
+
+    // Verify the system partition contents
+    verify_system_partition_contents(&mut boot_image)
+        .context("System partition verification failed")?;
 
     println!(
         "\n{} {}",
@@ -475,12 +630,19 @@ fn print_hashes(version_folder: &str, is_production: bool) -> Result<()> {
     check_images_exist(version_folder, is_production)?;
 
     // Print bootloader hash (no cosign2 header expected)
+    // Prefer boot.cip if it exists, otherwise boot.bin
+    let boot_cip_path = format!("{}/boot.cip", version_folder);
     let boot_bin_path = format!("{}/boot.bin", version_folder);
-    let bootloader_digest: String = sha2::Sha256::digest(fs::read(&boot_bin_path)?).encode_hex();
+    let bootloader_path = if Path::new(&boot_cip_path).exists() {
+        &boot_cip_path
+    } else {
+        &boot_bin_path
+    };
+    let bootloader_digest: String = sha2::Sha256::digest(fs::read(bootloader_path)?).encode_hex();
     println!("bootloader                     - {bootloader_digest}");
 
     // Print app image hash (with cosign2 header)
-    let app_bin_path = format!("{}/app.bin", version_folder);
+    let app_bin_path = format!("{}/keyos/app.bin", version_folder);
     print_digest_of_cosigned_file("app image", Path::new(&app_bin_path))?;
 
     // Print recovery image hash (may have cosign2 header)
