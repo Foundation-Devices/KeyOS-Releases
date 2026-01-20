@@ -1,0 +1,10 @@
+-- Ciphering Bootstrap --
+Received License: /Users/kenc/FINAL-SECRETS/SAM-BA/sam-ba-license-activation.txt, ignored
+Device: sama5d2x
+Customer Key File: /Users/kenc/FINAL-SECRETS/SAM-BA/cust.key
+Private Key File: (none)
+Private Key Password: (none)
+Certificate Chain File: (none)
+Input File: /Users/kenc/dev/KeyOSCombined/KeyOS-Releases/.worktrees/1.1.0/1.1.0/boot.bin
+Output File: boot.cip
+Ciphered bootstrap successfully written to 'boot_sama5d2x.cip'.
