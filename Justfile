@@ -162,10 +162,11 @@ sign VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"
 
     git -C "$WT" commit -m "$MSG"
     # Push to upstream or set it if missing
+    # Use refs/heads/ prefix to explicitly push to the branch, not a tag
     if git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
         git -C "$WT" push
     else
-        git -C "$WT" push -u origin "$VER"
+        git -C "$WT" push -u origin "refs/heads/$VER"
     fi
 
     echo "✅ $MSG"
@@ -299,10 +300,11 @@ unsign VERSION:
         done
 
         # Push to upstream or set it if missing
+        # Use refs/heads/ prefix to explicitly push to the branch, not a tag
         if git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
             git -C "$WT" push
         else
-            git -C "$WT" push -u origin "$VER"
+            git -C "$WT" push -u origin "refs/heads/$VER"
         fi
     fi
 
@@ -617,7 +619,7 @@ sign-bl VERSION SECRETS_DIR:
     (
       cd "$WT/$VER"
       ( "${CMD[@]}" ) 2>&1 | tee samba.log
-      exit "${PIPESTATUS[0]}"(with --allow-one-signature)
+      exit "${PIPESTATUS[0]}"
     ) || status=$?
     echo "Command exit code: $status"
     if [ "$status" -ne 0 ]; then
@@ -656,10 +658,11 @@ sign-bl VERSION SECRETS_DIR:
     MSG="Bootloader signed and pushed"
     git -C "$WT" commit -m "$MSG"
     # Push to upstream or set it if missing
+    # Use refs/heads/ prefix to explicitly push to the branch, not a tag
     if git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
         git -C "$WT" push
     else
-        git -C "$WT" push -u origin "$VER"
+        git -C "$WT" push -u origin "refs/heads/$VER"
     fi
 
     echo "✅ $MSG"

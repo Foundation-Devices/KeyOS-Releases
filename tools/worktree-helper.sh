@@ -23,7 +23,10 @@ setup_worktree() {
     local CREATED_WT_VAR="${4:-}"  # Optional: variable name to export creation status
 
     # Ensure the release branch exists locally
-    if ! git -C "$ROOT" rev-parse --verify "$VER" >/dev/null 2>&1; then
+    # Use refs/heads/ prefix to check specifically for LOCAL branches.
+    # Without this, git rev-parse would match tags with the same name,
+    # causing "refname is ambiguous" warnings.
+    if ! git -C "$ROOT" rev-parse --verify "refs/heads/$VER" >/dev/null 2>&1; then
         echo "ERROR: Branch '$VER' not found" >&2
         return 1
     fi
@@ -54,6 +57,9 @@ setup_worktree() {
         else
             # No uncommitted changes - safe to update
             echo "Updating worktree to latest..."
+            # Ensure we're on the branch (not detached HEAD) before pulling
+            # Use refs/heads/ prefix to explicitly refer to the branch, not a tag
+            git -C "$WT" checkout -B "$VER" "refs/heads/$VER" >/dev/null 2>&1 || true
             if git -C "$WT" pull --rebase; then
                 echo "Worktree updated successfully"
             else
@@ -69,7 +75,10 @@ setup_worktree() {
         # Worktree doesn't exist - create it
         echo "Creating worktree at: $WT"
         [ -n "$CREATED_WT_VAR" ] && eval "$CREATED_WT_VAR=1"
-        if git -C "$ROOT" worktree add "$WT" "$VER"; then
+        # Use -B flag to explicitly checkout the branch by name, avoiding ambiguity with tags
+        # This ensures we're on the branch, not in detached HEAD state
+        # -B will create or reset the branch to point at the specified commit
+        if git -C "$ROOT" worktree add -B "$VER" "$WT" "refs/heads/$VER"; then
             echo "Worktree created successfully"
         else
             echo "ERROR: Failed to create worktree" >&2
@@ -96,7 +105,10 @@ setup_worktree_force_reset() {
     local WT="$3"
 
     # Ensure the release branch exists locally
-    if ! git -C "$ROOT" rev-parse --verify "$VER" >/dev/null 2>&1; then
+    # Use refs/heads/ prefix to check specifically for LOCAL branches.
+    # Without this, git rev-parse would match tags with the same name,
+    # causing "refname is ambiguous" warnings.
+    if ! git -C "$ROOT" rev-parse --verify "refs/heads/$VER" >/dev/null 2>&1; then
         echo "ERROR: Branch '$VER' not found" >&2
         return 1
     fi
@@ -109,13 +121,16 @@ setup_worktree_force_reset() {
     if git -C "$WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         echo "Updating existing worktree at $WT to origin/$VER..."
         # Ensure we're on the correct branch name locally
-        git -C "$WT" checkout -B "$VER" || true
+        # Use refs/heads/ prefix to explicitly refer to the branch, not a tag
+        git -C "$WT" checkout -B "$VER" "refs/heads/$VER" || true
     elif [ -e "$WT" ]; then
         echo "ERROR: Worktree path exists but is not a git worktree: $WT" >&2
         return 1
     else
         echo "Creating worktree at: $WT"
-        if ! git -C "$ROOT" worktree add "$WT" "$VER"; then
+        # Use -B flag to explicitly checkout the branch by name, avoiding ambiguity with tags
+        # This ensures we're on the branch, not in detached HEAD state
+        if ! git -C "$ROOT" worktree add -B "$VER" "$WT" "refs/heads/$VER"; then
             echo "ERROR: Failed to create worktree" >&2
             return 1
         fi
