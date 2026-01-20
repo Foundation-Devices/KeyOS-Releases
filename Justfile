@@ -666,3 +666,122 @@ sign-bl VERSION SECRETS_DIR:
     fi
 
     echo "✅ $MSG"
+
+# NUCLEAR OPTION: Completely remove a release version (branches, tags, worktrees)
+# Usage: just nuke-release 1.1.0 (or just remove-release 1.1.0)
+# WARNING: This is destructive and cannot be undone!
+nuke-release VERSION:
+    #!/usr/bin/env bash
+    set -u
+    VER="{{VERSION}}"
+    ROOT="{{justfile_directory()}}"
+    WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-$ROOT/.worktrees}"
+    WT="$WORKTREES_DIR/$VER"
+
+    echo ""
+    echo "========================================================================"
+    echo "                    WARNING: NUCLEAR OPTION"
+    echo "========================================================================"
+    echo ""
+    echo "  This will PERMANENTLY DELETE the following for version $VER:"
+    echo ""
+    echo "    - All worktrees for $VER"
+    echo "    - Local branch refs/heads/$VER"
+    echo "    - Remote branch origin/$VER"
+    echo "    - Local tag refs/tags/$VER"
+    echo "    - Remote tag origin/$VER"
+    echo ""
+    echo "  THIS CANNOT BE UNDONE!"
+    echo ""
+    echo "========================================================================"
+    echo ""
+    read -p "Are you sure you want to nuke release $VER? (yes/no): " CONFIRM1
+    if [ "$CONFIRM1" != "yes" ]; then echo "Aborted."; exit 1; fi
+
+    echo ""
+    read -p "Type the version number '$VER' to confirm: " CONFIRM2
+    if [ "$CONFIRM2" != "$VER" ]; then echo "Version mismatch. Aborted."; exit 1; fi
+
+    echo ""
+    echo "Proceeding with nuclear removal of release $VER..."
+    echo ""
+
+    # Fetch latest from remote
+    echo "Fetching latest from remote..."
+    git -C "$ROOT" fetch --all --prune || true
+
+    # Find and remove ALL worktrees for this version
+    echo "Searching for all worktrees for version $VER..."
+    WORKTREE_LIST=$(git -C "$ROOT" worktree list --porcelain 2>/dev/null || true)
+    if [ -n "$WORKTREE_LIST" ]; then
+        echo "$WORKTREE_LIST" | while IFS= read -r line; do
+            if [[ "$line" =~ ^worktree\ (.+)$ ]]; then
+                CURRENT_WT="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^branch\ refs/heads/(.+)$ ]]; then
+                CURRENT_BRANCH="${BASH_REMATCH[1]}"
+                if [ "$CURRENT_BRANCH" = "$VER" ]; then
+                    echo "  Found worktree at $CURRENT_WT (branch: $CURRENT_BRANCH)"
+                    # Check if we're currently in this worktree
+                    if [ "$(pwd)" = "$CURRENT_WT" ] || [[ "$(pwd)" == "$CURRENT_WT"/* ]]; then
+                        echo "  WARNING: You are currently in this worktree!"
+                        echo "  Switching to main branch in main repository..."
+                        cd "$ROOT"
+                        git -C "$ROOT" checkout main 2>/dev/null || git -C "$ROOT" checkout master 2>/dev/null || true
+                    fi
+                    echo "  Removing worktree at $CURRENT_WT..."
+                    git -C "$ROOT" worktree remove --force "$CURRENT_WT" 2>/dev/null || rm -rf "$CURRENT_WT" 2>/dev/null || true
+                fi
+            fi
+        done
+    fi
+
+    # Also check the default worktree location
+    if [ -d "$WT" ]; then
+        echo "Removing worktree at $WT..."
+        git -C "$ROOT" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT" 2>/dev/null || true
+    fi
+
+    # Prune stale worktree references
+    git -C "$ROOT" worktree prune 2>/dev/null || true
+
+    # Delete local branch using explicit refs/heads/ prefix
+    if git -C "$ROOT" rev-parse --verify "refs/heads/$VER" >/dev/null 2>&1; then
+        echo "Deleting local branch refs/heads/$VER..."
+        git -C "$ROOT" branch -D "$VER"
+    else
+        echo "No local branch refs/heads/$VER found"
+    fi
+
+    # Delete remote branch using explicit refs/heads/ prefix
+    if git -C "$ROOT" ls-remote --exit-code --heads origin "$VER" >/dev/null 2>&1; then
+        echo "Deleting remote branch origin/$VER..."
+        git -C "$ROOT" -c core.hooksPath=/dev/null push origin --delete "refs/heads/$VER" 2>/dev/null || true
+    else
+        echo "No remote branch origin/$VER found"
+    fi
+
+    # Delete local tag using explicit refs/tags/ prefix
+    if git -C "$ROOT" rev-parse --verify "refs/tags/$VER" >/dev/null 2>&1; then
+        echo "Deleting local tag refs/tags/$VER..."
+        git -C "$ROOT" tag -d "$VER"
+    else
+        echo "No local tag refs/tags/$VER found"
+    fi
+
+    # Delete remote tag using explicit refs/tags/ prefix
+    if git -C "$ROOT" ls-remote --exit-code --tags origin "$VER" >/dev/null 2>&1; then
+        echo "Deleting remote tag origin/$VER..."
+        git -C "$ROOT" -c core.hooksPath=/dev/null push origin --delete "refs/tags/$VER" 2>/dev/null || true
+    else
+        echo "No remote tag origin/$VER found"
+    fi
+
+    echo ""
+    echo "========================================================================"
+    echo "  ☢️  Release $VER has been completely nuked  ☢️"
+    echo "========================================================================"
+    echo ""
+
+# Alias for nuke-release (for backwards compatibility)
+remove-release VERSION:
+    @just nuke-release {{VERSION}}
