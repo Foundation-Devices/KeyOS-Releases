@@ -346,7 +346,7 @@ fn create_system_partition(file: &mut File, version_folder: &str) -> Result<()> 
         .write_all(&fs::read(&app_bin_path)?)?;
 
     // Copy apps directory if it exists
-    let apps_dir_path = format!("{}/apps", version_folder);
+    let apps_dir_path = format!("{}/keyos/apps", version_folder);
     if Path::new(&apps_dir_path).exists() {
         println!("  {} Copying apps directory", "→".blue());
         let apps_dir_disk = fs.root_dir().create_dir("apps")?;
@@ -488,7 +488,7 @@ fn print_hashes(version_folder: &str, is_production: bool) -> Result<()> {
     print_digest_of_cosigned_file("recovery image", Path::new(&recovery_bin_path))?;
 
     // Print app hashes if apps directory exists
-    let apps_dir_path = format!("{}/apps", version_folder);
+    let apps_dir_path = format!("{}/keyos/apps", version_folder);
     if Path::new(&apps_dir_path).exists() {
         for entry in fs::read_dir(&apps_dir_path)? {
             let app_dir = entry?;
