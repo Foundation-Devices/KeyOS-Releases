@@ -17,17 +17,17 @@ sign-dev-bl VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign
     cargo run --manifest-path tools/signer/Cargo.toml -- sign-files --developer --sign-bootloader {{VERSION}} {{CONFIG_PATH}}
 
 # Create tar file (only when all files have two signatures)
-create-tar VERSION:
+create-tar VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
     @echo "Creating tar file for version {{VERSION}}"
-    cargo run --manifest-path tools/signer/Cargo.toml -- create-tar {{VERSION}}
+    cargo run --manifest-path tools/signer/Cargo.toml -- create-tar {{VERSION}} {{CONFIG_PATH}}
 
-create-recovery-tar VERSION:
+create-recovery-tar VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
     @echo "Creating recovery tar file for version {{VERSION}}"
-    cargo run --manifest-path tools/signer/Cargo.toml -- create-tar {{VERSION}} --recovery
+    cargo run --manifest-path tools/signer/Cargo.toml -- create-tar {{VERSION}} {{CONFIG_PATH}} --recovery
 
-create-recovery-tar-dev VERSION:
+create-recovery-tar-dev VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
     @echo "Creating recovery tar file for version {{VERSION}} (one signature)"
-    cargo run --manifest-path tools/signer/Cargo.toml -- create-tar {{VERSION}} --recovery --allow-one-signature
+    cargo run --manifest-path tools/signer/Cargo.toml -- create-tar {{VERSION}} {{CONFIG_PATH}} --recovery --allow-one-signature
 
 # Sign the tar file with the provided key
 sign-tar VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):

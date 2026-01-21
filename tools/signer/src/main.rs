@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -59,6 +60,10 @@ enum Commands {
     CreateTar {
         /// Version number (e.g., 1.0.2 or v1.0.2)
         version: String,
+
+        /// Path to cosign2 configuration file. cosign2 is used to sign the recovery tar manifest file
+        #[arg(default_value = "~/cosign2.toml")]
+        config_path: String,
 
         /// Supply this argument to produce a tar file for the Firmware Recovery mode.
         #[arg(long)]
@@ -126,6 +131,7 @@ fn main() -> Result<()> {
             )?;
         }
         Commands::CreateTar {
+            config_path,
             version,
             recovery,
             allow_one_signature,
@@ -133,6 +139,7 @@ fn main() -> Result<()> {
             let version_folder = version.clone();
             let firmware_version = strip_v_prefix(version);
             create_tar(
+                config_path,
                 &version_folder,
                 &firmware_version,
                 *recovery,
@@ -184,7 +191,7 @@ fn sign_files(
     }
 
     // Check for required files
-    let app_bin = format!("{}/app.bin", version_folder);
+    let app_bin = format!("{}/keyos/app.bin", version_folder);
     if Path::new(&app_bin).exists() {
         // Sign app.bin
         print!(
@@ -202,6 +209,7 @@ fn sign_files(
                 "--in-place",
                 "--binary-version",
                 firmware_version,
+                if is_developer { "--developer" } else { "" },
             ])
             .output()
             .context(format!("{} cosign2 error", "✗".red()))?;
@@ -306,12 +314,12 @@ fn sign_files(
     println!(
         "\n{}",
         format!(
-            "Looking for dynamically loadable apps in {}/apps/...",
+            "Looking for dynamically loadable apps in {}/keyos/apps/...",
             version_folder
         )
         .bold()
     );
-    let apps_dir = format!("{}/apps", version_folder);
+    let apps_dir = format!("{}/keyos/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
 
     if apps_path.is_dir() {
@@ -370,7 +378,7 @@ fn sign_files(
     } else {
         println!(
             "{}",
-            format!("No apps directory found at {}/apps/", version_folder).yellow()
+            format!("No apps directory found at {}/keyos/apps/", version_folder).yellow()
         );
     }
 
@@ -385,6 +393,7 @@ fn sign_files(
 }
 
 fn create_tar(
+    config_path: &str,
     version_folder: &str,
     firmware_version: &str,
     is_recovery: bool,
@@ -407,7 +416,7 @@ fn create_tar(
 
     println!("Checking signatures on all files...");
 
-    let app_bin = format!("{}/app.bin", version_folder);
+    let app_bin = format!("{}/keyos/app.bin", version_folder);
     let recovery_bin = format!("{}/recovery.bin", version_folder);
 
     let has_app_bin = Path::new(&app_bin).exists();
@@ -439,7 +448,7 @@ fn create_tar(
         let app_status = check_signatures(&app_bin, allow_one_signature)?;
         if !app_status.has_second_signature && !allow_one_signature {
             all_signed = false;
-            unsigned_files.push("app.bin".to_string());
+            unsigned_files.push("keyos/app.bin".to_string());
         }
     }
 
@@ -452,10 +461,10 @@ fn create_tar(
     }
 
     // Check all app files
-    let apps_dir = format!("{}/apps", version_folder);
+    let apps_dir = format!("{}/keyos/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
 
-    if apps_path.is_dir() {
+    if apps_path.is_dir() && has_app_bin {
         for entry in fs::read_dir(apps_path).context("Failed to read apps directory")? {
             let entry = entry.context("Failed to read directory entry")?;
             let path = entry.path();
@@ -518,13 +527,6 @@ fn create_tar(
         files_to_include.push(boot_bin);
     }
 
-    // Generate manifest file
-    println!("Generating manifest file...");
-
-    generate_manifest(version_folder, firmware_version, has_app_bin)?;
-
-    println!("{} Manifest file generated successfully", "✓".green());
-
     // Create the tar file
     let tar_file = format!("{}/KeyOS-v{}.bin", version_folder, firmware_version);
 
@@ -538,9 +540,9 @@ fn create_tar(
     files_to_include.push(manifest_file.clone());
 
     // Add all .elf files in the apps directory
-    let apps_dir = format!("{}/apps", version_folder);
+    let apps_dir = format!("{}/keyos/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
-    if apps_path.is_dir() {
+    if apps_path.is_dir() && has_app_bin {
         for entry in fs::read_dir(apps_path).context("Failed to read apps directory")? {
             let entry = entry.context("Failed to read directory entry")?;
             let path = entry.path();
@@ -558,56 +560,22 @@ fn create_tar(
     }
 
     // Add all assets in the common directory
-    let mut num_assets = 0;
-    let common_dir = format!("{}/common", version_folder);
-    let common_path = Path::new(&common_dir);
-    if common_path.exists() && common_path.is_dir() {
-        for entry in fs::read_dir(common_path).context("Failed to read common directory")? {
-            let entry = entry.context("Failed to read directory entry")?;
-            let path = entry.path();
-
-            if path.is_file() {
-                files_to_include.push(path.to_string_lossy().to_string());
-                num_assets += 1;
-            } else if path.is_dir() {
-                // If it's a directory, include all files in it
-                for sub_entry in fs::read_dir(&path).context("Failed to read subdirectory")? {
-                    let sub_entry = sub_entry.context("Failed to read subdirectory entry")?;
-                    files_to_include.push(sub_entry.path().to_string_lossy().to_string());
-                    num_assets += 1;
-                }
-            }
-        }
-    }
+    let common_dir = format!("{}/keyos/common", version_folder);
+    let num_assets = collect_files_recursively(Path::new(&common_dir), &mut files_to_include)?;
 
     // Add all recovery OS assets in the common directory
     let mut num_assets_recovery_os = 0;
-    let common_dir = format!("{}/common-boot", version_folder);
-    let common_path = Path::new(&common_dir);
-    if common_path.exists() && common_path.is_dir() {
-        for entry in fs::read_dir(common_path).context("Failed to read common-boot directory")? {
-            let entry = entry.context("Failed to read directory entry")?;
-            let path = entry.path();
-
-            if path.is_file() {
-                files_to_include.push(path.to_string_lossy().to_string());
-                num_assets_recovery_os += 1;
-            } else if path.is_dir() {
-                // If it's a directory, include all files in it
-                for sub_entry in fs::read_dir(&path).context("Failed to read subdirectory")? {
-                    let sub_entry = sub_entry.context("Failed to read subdirectory entry")?;
-                    files_to_include.push(sub_entry.path().to_string_lossy().to_string());
-                    num_assets_recovery_os += 1;
-                }
-            }
-        }
+    let common_boot_dir = format!("{}/common-boot", version_folder);
+    if !has_app_bin {
+        num_assets_recovery_os =
+            collect_files_recursively(Path::new(&common_boot_dir), &mut files_to_include)?;
     }
 
     // Add all bootloader assets in the blassets
     let mut num_assets_bootloader = 0;
     let blassets = format!("{}/blassets", version_folder);
     let blassets_path = Path::new(&blassets);
-    if blassets_path.exists() && blassets_path.is_dir() {
+    if blassets_path.exists() && blassets_path.is_dir() && (has_boot_cip || has_boot_bin) {
         for entry in fs::read_dir(blassets_path).context("Failed to read blassets directory")? {
             let entry = entry.context("Failed to read directory entry")?;
             let path = entry.path();
@@ -638,6 +606,19 @@ fn create_tar(
             "✓".green()
         );
     }
+
+    // Generate manifest file
+    println!("Generating manifest file...");
+
+    generate_manifest(
+        config_path,
+        allow_one_signature,
+        version_folder,
+        firmware_version,
+        &files_to_include,
+    )?;
+
+    println!("{} Manifest file generated successfully", "✓".green());
 
     println!(
         "Creating tar file: {}...",
@@ -682,6 +663,23 @@ fn create_tar(
         .bold()
     );
     Ok(())
+}
+
+fn collect_files_recursively(dir: &Path, files: &mut Vec<String>) -> Result<usize> {
+    let mut count = 0;
+    if dir.exists() && dir.is_dir() {
+        for entry in fs::read_dir(dir).context("Failed to read directory")? {
+            let entry = entry.context("Failed to read directory entry")?;
+            let path = entry.path();
+            if path.is_file() {
+                files.push(path.to_string_lossy().to_string());
+                count += 1;
+            } else if path.is_dir() {
+                count += collect_files_recursively(&path, files)?;
+            }
+        }
+    }
+    Ok(count)
 }
 
 fn sign_tar(version_folder: &str, config_path: &str, firmware_version: &str) -> Result<()> {
@@ -794,15 +792,15 @@ fn validate(version_folder: &str, firmware_version: &str) -> Result<()> {
     let mut unsigned_files = Vec::new();
 
     // Check app.bin
-    let app_bin = format!("{}/app.bin", version_folder);
+    let app_bin = format!("{}/keyos/app.bin", version_folder);
     if !Path::new(&app_bin).exists() {
         println!("  {} app.bin is missing", "✗".red());
-        missing_files.push("app.bin".to_string());
+        missing_files.push(app_bin.to_string());
         all_valid = false;
     } else {
         let app_status = check_signatures(&app_bin, false)?;
         if !app_status.has_second_signature {
-            unsigned_files.push("app.bin".to_string());
+            unsigned_files.push("keyos/app.bin".to_string());
             all_valid = false;
         }
     }
@@ -816,7 +814,7 @@ fn validate(version_folder: &str, firmware_version: &str) -> Result<()> {
     }
 
     // Check all app files
-    let apps_dir = format!("{}/apps", version_folder);
+    let apps_dir = format!("{}/keyos/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
 
     if !apps_path.is_dir() {
@@ -972,11 +970,12 @@ fn check_signatures(file_path: &str, is_dev: bool) -> Result<SignatureStatus> {
 }
 
 fn generate_manifest(
+    config_path: &str,
+    is_developer: bool,
     version_folder: &str,
     firmware_version: &str,
-    has_app_bin: bool,
+    files: &[String],
 ) -> Result<()> {
-    // Manifest file generation is handled by the progress bar in the calling function
     let manifest_file = format!("{}/manifest.json", version_folder);
 
     // Create manifest structure
@@ -985,21 +984,35 @@ fn generate_manifest(
         files: Vec::new(),
     };
 
-    // Add app.bin to manifest
-    if has_app_bin {
-        let app_bin = format!("{}/app.bin", version_folder);
-        let app_hash = calculate_hash(&app_bin)?;
+    // Add OS and app binaries into the manifest
+    for file in files {
+        // Skip the manifest file itself
+        if *file == manifest_file {
+            continue;
+        }
+
+        let has_cosign2_header = file.ends_with("app.bin")
+            || file.ends_with("boot.bin")
+            || file.ends_with("boot.cip")
+            || file.ends_with("recovery.bin")
+            || file.ends_with("app.elf");
+
+        let hash = if has_cosign2_header {
+            calculate_hash(&PathBuf::from_str(&file).unwrap())?
+        } else {
+            calculate_asset_hash(&PathBuf::from_str(&file).unwrap())?
+        };
+
         manifest.files.push(FileEntry {
-            name: "app.bin".to_string(),
-            hash: format!("0x{}", app_hash),
+            name: file.to_string(),
+            hash,
         });
     }
 
     // Add each app to manifest
-    let apps_dir = format!("{}/apps", version_folder);
+    let apps_dir = format!("{}/keyos/apps", version_folder);
     let apps_path = Path::new(&apps_dir);
 
-    let mut app_count = 0;
     if apps_path.is_dir() {
         for entry in fs::read_dir(apps_path).context("Failed to read apps directory")? {
             let entry = entry.context("Failed to read directory entry")?;
@@ -1008,39 +1021,95 @@ fn generate_manifest(
             if path.is_file() && path.extension().map_or(false, |ext| ext == "elf") {
                 if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
                     if file_name.starts_with("gui-app") {
-                        let app_path = path.to_str().unwrap();
-                        let app_hash = calculate_hash(app_path)?;
+                        let app_hash = calculate_hash(&path)?;
 
                         manifest.files.push(FileEntry {
                             name: format!("apps/{}", file_name),
-                            hash: format!("0x{}", app_hash),
+                            hash: app_hash,
                         });
-
-                        app_count += 1;
                     }
                 }
             }
         }
-        // App count is displayed in the calling function
     }
 
     // Write manifest to file
     let manifest_json =
-        serde_json::to_string_pretty(&manifest).context("Failed to serialize manifest to JSON")?;
+        serde_json::to_string(&manifest).context("Failed to serialize manifest to JSON")?;
 
     fs::write(&manifest_file, manifest_json)
         .context(format!("Failed to write manifest file: {}", manifest_file))?;
+
+    // Sign the manifest.json
+    print!(
+        "Signing manifest ({})...",
+        Path::new(&manifest_file)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+    );
+
+    let output = Command::new("cosign2")
+        .args([
+            "sign",
+            "-i",
+            &manifest_file,
+            "-c",
+            config_path,
+            "--in-place",
+            "--binary-version",
+            firmware_version,
+            if is_developer { "--developer" } else { "" },
+        ])
+        .output()
+        .context(format!("{} cosign2 error", "✗".red()))?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).to_string();
+        println!("{} Failed to sign", "✗".red());
+
+        return Err(SignerError::CommandFailed(err).into());
+    }
+
+    println!("{}", "✓ Success".green());
+
     Ok(())
 }
 
-fn calculate_hash(file_path: &str) -> Result<String> {
-    let mut file =
-        File::open(file_path).context(format!("Failed to open file for hashing: {}", file_path))?;
+fn calculate_cosign2_digest(path: &Path) -> Result<Option<String>> {
+    use hex::ToHex;
+
+    const COSIGN2_HEADER_SIZE: usize = 0x800;
+    let file_data = fs::read(path).context(format!("Failed to read file: {}", path.display()))?;
+
+    Ok(if file_data.len() > COSIGN2_HEADER_SIZE {
+        let digest: String = sha2::Sha256::digest(&file_data[COSIGN2_HEADER_SIZE..]).encode_hex();
+        Some(digest)
+    } else {
+        None
+    })
+}
+
+fn calculate_asset_hash(asset_path: &Path) -> Result<String> {
+    let mut file = File::open(asset_path).context(format!(
+        "Failed to open asset file for hashing: {}",
+        asset_path.display()
+    ))?;
 
     let mut hasher = Sha256::new();
-    io::copy(&mut file, &mut hasher)
-        .context(format!("Failed to read file for hashing: {}", file_path))?;
+    io::copy(&mut file, &mut hasher).context(format!(
+        "Failed to read file for hashing: {}",
+        asset_path.display()
+    ))?;
 
     let hash = hasher.finalize();
     Ok(hex::encode(hash))
+}
+
+fn calculate_hash(file_path: &Path) -> Result<String> {
+    let Some(cosign2_digest) = calculate_cosign2_digest(file_path)? else {
+        anyhow::bail!("File {} isn't signed with cosign2", file_path.display());
+    };
+
+    Ok(cosign2_digest.to_string())
 }
