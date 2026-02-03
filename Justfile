@@ -57,12 +57,12 @@ create-release BASE_VERSION NEW_VERSION CONFIG_PATH:
 
     # Step 2: Create core system recovery tar
     echo "Step 2/5: Creating core system recovery tar..."
-    (cd "$NEW_WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-recovery-tar "$NEW_VER" --core-system-recovery)
+    (cd "$NEW_WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-recovery-tar "$NEW_VER" "$CFG" --core-system-recovery)
     echo ""
 
     # Step 3: Create recovery tar
     echo "Step 3/5: Creating recovery tar..."
-    (cd "$NEW_WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-recovery-tar "$NEW_VER")
+    (cd "$NEW_WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-recovery-tar "$NEW_VER" "$CFG")
     echo ""
 
     # Step 4: Create update file
@@ -99,8 +99,8 @@ create-release BASE_VERSION NEW_VERSION CONFIG_PATH:
     echo ""
     echo "✅ Release $NEW_VER complete!"
     echo "   Factory image: $NEW_WT/$NEW_VER/$OUTPUT"
-    echo "   Core system recovery: $NEW_WT/$NEW_VER/KeyOS-v$NEW_VER-CoreSystemRecovery.tar"
-    echo "   Recovery tar: $NEW_WT/$NEW_VER/KeyOS-v$NEW_VER-Recovery.tar"
+    echo "   Core system recovery: $NEW_WT/$NEW_VER/KeyOS-v$NEW_VER-CoreSystemRecovery.bin"
+    echo "   Recovery: $NEW_WT/$NEW_VER/KeyOS-v$NEW_VER-Recovery.bin"
     echo "   Update file: $UPDATE_OUTPUT"
 
 # Sign individual files with the provided key (uses a dedicated git worktree to avoid switching your current branch)
@@ -172,14 +172,24 @@ sign VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"
     echo "✅ $MSG"
 
 # Create recovery tar file (only when all files have two signatures)
-create-recovery-tar VERSION:
+create-recovery-tar VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
     #!/usr/bin/env bash
     set -u
 
     VER="{{VERSION}}"
+    CFG="{{CONFIG_PATH}}"
     ROOT="{{justfile_directory()}}"
     WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
     WT="$WORKTREES_DIR/$VER"
+
+    # Expand ~ in config path if present
+    if [[ "$CFG" == "~/"* ]]; then
+        CFG="$HOME/${CFG#~/}"
+    fi
+    if [ ! -f "$CFG" ]; then
+        echo "ERROR: Config file not found: $CFG" >&2
+        exit 1
+    fi
 
     # Check if worktree exists
     if [ ! -d "$WT" ]; then
@@ -189,18 +199,57 @@ create-recovery-tar VERSION:
     fi
 
     echo "Creating recovery tar file for version $VER"
-    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-recovery-tar "$VER")
+    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-recovery-tar "$VER" "$CFG")
 
-
-# Create core system recovery tar (includes bootloader and recovery OS)
-create-core-system-recovery-tar VERSION:
+# Create recovery tar for development (allows one signature)
+create-recovery-tar-dev VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
     #!/usr/bin/env bash
     set -u
 
     VER="{{VERSION}}"
+    CFG="{{CONFIG_PATH}}"
     ROOT="{{justfile_directory()}}"
     WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
     WT="$WORKTREES_DIR/$VER"
+
+    # Expand ~ in config path if present
+    if [[ "$CFG" == "~/"* ]]; then
+        CFG="$HOME/${CFG#~/}"
+    fi
+    if [ ! -f "$CFG" ]; then
+        echo "ERROR: Config file not found: $CFG" >&2
+        exit 1
+    fi
+
+    # Check if worktree exists
+    if [ ! -d "$WT" ]; then
+        echo "ERROR: Worktree not found at $WT" >&2
+        echo "Please run 'just sign $VER' first to create the worktree" >&2
+        exit 1
+    fi
+
+    echo "Creating recovery tar file for version $VER (one signature)"
+    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-recovery-tar "$VER" "$CFG" --allow-one-signature)
+
+# Create core system recovery tar (includes ONLY bootloader and recovery.bin)
+create-core-system-recovery-tar VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
+    #!/usr/bin/env bash
+    set -u
+
+    VER="{{VERSION}}"
+    CFG="{{CONFIG_PATH}}"
+    ROOT="{{justfile_directory()}}"
+    WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
+    WT="$WORKTREES_DIR/$VER"
+
+    # Expand ~ in config path if present
+    if [[ "$CFG" == "~/"* ]]; then
+        CFG="$HOME/${CFG#~/}"
+    fi
+    if [ ! -f "$CFG" ]; then
+        echo "ERROR: Config file not found: $CFG" >&2
+        exit 1
+    fi
 
     # Check if worktree exists
     if [ ! -d "$WT" ]; then
@@ -210,17 +259,27 @@ create-core-system-recovery-tar VERSION:
     fi
 
     echo "Creating core system recovery tar file for version $VER"
-    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-recovery-tar "$VER" --core-system-recovery)
+    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-recovery-tar "$VER" "$CFG" --core-system-recovery)
 
 # Create core system recovery tar for development (allows one signature)
-create-core-system-recovery-tar-dev VERSION:
+create-core-system-recovery-tar-dev VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
     #!/usr/bin/env bash
     set -u
 
     VER="{{VERSION}}"
+    CFG="{{CONFIG_PATH}}"
     ROOT="{{justfile_directory()}}"
     WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
     WT="$WORKTREES_DIR/$VER"
+
+    # Expand ~ in config path if present
+    if [[ "$CFG" == "~/"* ]]; then
+        CFG="$HOME/${CFG#~/}"
+    fi
+    if [ ! -f "$CFG" ]; then
+        echo "ERROR: Config file not found: $CFG" >&2
+        exit 1
+    fi
 
     # Check if worktree exists
     if [ ! -d "$WT" ]; then
@@ -230,7 +289,7 @@ create-core-system-recovery-tar-dev VERSION:
     fi
 
     echo "Creating core system recovery tar file for version $VER (one signature)"
-    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-recovery-tar "$VER" --core-system-recovery --allow-one-signature)
+    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-recovery-tar "$VER" "$CFG" --core-system-recovery --allow-one-signature)
 
 
 # Sign the recovery tar files with the provided key
@@ -498,174 +557,151 @@ finalize VERSION:
     echo "✅ Finalize complete for version $VER"
 
 
-# Sign bootloader (boot.bin) with Atmel/Microchip SAM-BA cipher using provided secrets directory
-# Usage: just sign-bl 1.0.0 ~/secrets
-# Requires: SECURE_SAMBA_CIPHER_PATH env var pointing to secure-sam-ba-cipher.py
-# Optional: SECURE_SAMBA_PYTHON to choose interpreter; otherwise auto-detects venv near the tool or falls back to python3
-sign-bl VERSION SECRETS_DIR:
+# Package signable binary files into a zip for sending to another signer
+# The output filename depends on current signature status:
+#   - 0 signatures: KeyOS-v{version}-unsigned.zip
+#   - 1 signature:  KeyOS-v{version}-partially-signed.zip
+#   - 2 signatures: No zip created (already fully signed)
+# Usage: just make-zip 1.1.0
+make-zip VERSION:
     #!/usr/bin/env bash
-    set -u
+    set -eu
 
     VER="{{VERSION}}"
-    SEC_DIR_RAW="{{SECRETS_DIR}}"
     ROOT="{{justfile_directory()}}"
     WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
     WT="$WORKTREES_DIR/$VER"
 
-    # Expand ~ in secrets dir path if present
-    SEC_DIR="$SEC_DIR_RAW"
-    if [[ "$SEC_DIR" == "~/"* ]]; then
-        SEC_DIR="$HOME/${SEC_DIR#~/}"
-    fi
+    mkdir -p "$WORKTREES_DIR"
 
-    # Locate secure-sam-ba-cipher script from env var and expand ~
-    if [ -z "${SECURE_SAMBA_CIPHER_PATH:-}" ]; then
-        echo "ERROR: SECURE_SAMBA_CIPHER_PATH is not set. Set it to the path of secure-sam-ba-cipher.py" >&2
-        exit 1
-    fi
-    SAMBA="$SECURE_SAMBA_CIPHER_PATH"
-    if [[ "$SAMBA" == "~/"* ]]; then
-        SAMBA="$HOME/${SAMBA#~/}"
-    fi
-    if [ ! -f "$SAMBA" ]; then
-        echo "ERROR: secure-sam-ba-cipher.py not found at: $SAMBA" >&2
-        exit 1
-    fi
-
-    # Determine Python interpreter for SAM-BA tool
-    if [ -n "${SECURE_SAMBA_PYTHON:-}" ]; then
-        PY="$SECURE_SAMBA_PYTHON"
-        if [[ "$PY" == "~/"* ]]; then
-            PY="$HOME/${PY#~/}"
-        fi
-        if [ ! -x "$PY" ]; then
-            echo "ERROR: SECURE_SAMBA_PYTHON is set but not executable: $PY" >&2
-            exit 1
-        fi
-    else
-        SAMBA_DIR="$(cd "$(dirname "$SAMBA")" && pwd)"
-        PY=""
-        if [ -x "$SAMBA_DIR/venv/bin/python" ]; then
-            PY="$SAMBA_DIR/venv/bin/python"
-        elif [ -x "$SAMBA_DIR/.venv/bin/python" ]; then
-            PY="$SAMBA_DIR/.venv/bin/python"
-        else
-            PY="$(command -v python3 || true)"
-        fi
-        if [ -z "$PY" ]; then
-            echo "ERROR: Could not locate a Python interpreter. Set SECURE_SAMBA_PYTHON or ensure python3 is available." >&2
-            exit 1
-        fi
-    fi
-    echo "Using Python interpreter: $PY"
-
-
-    if [ ! -d "$SEC_DIR" ]; then
-        echo "ERROR: Secrets directory not found: $SEC_DIR" >&2
-        exit 1
-    fi
-
-    ACT="$SEC_DIR/sam-ba-license-activation.txt"
-    CUST="$SEC_DIR/cust.key"
-
-    for f in "$ACT" "$CUST"; do
-        if [ ! -f "$f" ]; then
-            echo "ERROR: Missing required secrets file: $f" >&2
-            exit 1
-        fi
-    done
-
-    # Setup/update worktree using helper function (force reset mode)
+    # Setup/update worktree using helper function
     source "$ROOT/tools/worktree-helper.sh"
-    if ! setup_worktree_force_reset "$ROOT" "$VER" "$WT"; then
+    if ! setup_worktree "$ROOT" "$VER" "$WT"; then
         exit 1
     fi
 
-    # Verify the release directory exists and boot.bin is present
     if [ ! -d "$WT/$VER" ]; then
         echo "ERROR: Release directory not found: $WT/$VER" >&2
         exit 1
     fi
 
-    BOOT_IN="$WT/$VER/boot.bin"
-    if [ ! -f "$BOOT_IN" ]; then
-        echo "ERROR: boot.bin not found in $WT/$VER" >&2
+    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- package "$VER" -o "KeyOS-v$VER.zip")
+    echo "Send the zip file to the other signer."
+
+# Unpack a signed zip back into the version folder and commit
+# Usage: just push-zip 1.1.0 /path/to/Release-1.1.0-signed.zip
+push-zip VERSION ZIP_PATH:
+    #!/usr/bin/env bash
+    set -eu
+
+    VER="{{VERSION}}"
+    ZIP="{{ZIP_PATH}}"
+    ROOT="{{justfile_directory()}}"
+    WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
+    WT="$WORKTREES_DIR/$VER"
+
+    mkdir -p "$WORKTREES_DIR"
+
+    # Setup/update worktree using helper function
+    source "$ROOT/tools/worktree-helper.sh"
+    if ! setup_worktree "$ROOT" "$VER" "$WT"; then
         exit 1
     fi
 
-    echo "Signing bootloader for version $VER using secrets at $SEC_DIR"
-    echo "Working directory: $WT/$VER"
-    echo "SAM-BA tool: $SAMBA"
-    echo "Python interpreter: $PY"
-    "$PY" -V 2>&1 || true
-
-    # Quick, non-secret file size checks
-    echo "Input file sizes (bytes):"
-    wc -c "$BOOT_IN" "$CUST" "$ACT" 2>/dev/null || true
-
-    # Build exact command as an array for reliability
-    CMD=("$PY" "$SAMBA" bootstrap -d sama5d2x -l "$ACT" -k "$CUST" -i "$BOOT_IN" -o boot.cip)
-
-    # Print an exact, copy/pastable command line the user can run manually
-    printf 'Manual repro:\n  cd %q && ' "$WT/$VER"
-    printf '%q ' "${CMD[@]}"
-    echo
-
-    # Ensure unbuffered Python so logs are flushed immediately
-    export PYTHONUNBUFFERED=1
-
-    # Execute the command with tee to capture a log file, preserving original exit code
-    status=0
-    (
-      cd "$WT/$VER"
-      ( "${CMD[@]}" ) 2>&1 | tee samba.log
-      exit "${PIPESTATUS[0]}"
-    ) || status=$?
-    echo "Command exit code: $status"
-    if [ "$status" -ne 0 ]; then
-        echo "---- Last 50 lines of $WT/$VER/samba.log ----"
-        tail -n 50 "$WT/$VER/samba.log" || true
-        echo "--------------------------------------------"
-        exit "$status"
+    if [ ! -d "$WT/$VER" ]; then
+        echo "ERROR: Release directory not found: $WT/$VER" >&2
+        exit 1
     fi
 
-    # Normalize device-specific output (e.g., boot_sama5d2x.cip) to boot.cip
-    if [ ! -f "$WT/$VER/boot.cip" ]; then
-        if [ -f "$WT/$VER/boot_sama5d2x.cip" ]; then
-            mv -f "$WT/$VER/boot_sama5d2x.cip" "$WT/$VER/boot.cip"
-        else
-            CAND="$(ls -1 "$WT/$VER"/boot_*.cip 2>/dev/null | head -n1 || true)"
-            if [ -n "$CAND" ]; then
-                mv -f "$CAND" "$WT/$VER/boot.cip"
-            fi
-        fi
+    # Resolve relative path to absolute
+    if [[ "$ZIP" != /* ]]; then
+        ZIP="$(pwd)/$ZIP"
     fi
-    if [ -f "$WT/$VER/boot.cip" ]; then
-        echo "✅ boot.cip created: $WT/$VER/boot.cip"
+
+    if [ ! -f "$ZIP" ]; then
+        echo "ERROR: Zip file not found: $ZIP" >&2
+        exit 1
+    fi
+
+    echo "Unpacking $ZIP into version $VER..."
+    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- unpack "$VER" "$ZIP")
+
+    # Determine commit message based on signature state after unpacking
+    if (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- validate "$VER" --files-only) >/dev/null 2>&1; then
+        MSG="Second signatures applied from zip"
     else
-        echo "ERROR: boot.cip was not created" >&2
-        ls -l "$WT/$VER"/*.cip 2>/dev/null || true
-        exit 1
+        MSG="First signatures applied from zip"
     fi
 
-    # Stage and commit the signed bootloader changes within the worktree
+    # Commit the changes
     git -C "$WT" add -A "$VER"
     if git -C "$WT" diff --cached --quiet -- "$VER"; then
-        echo "No changes detected in $VER; aborting commit." >&2
+        echo "No changes detected; nothing to commit."
+    else
+        git -C "$WT" commit -m "$MSG"
+        if git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+            git -C "$WT" push
+        else
+            git -C "$WT" push -u origin "refs/heads/$VER"
+        fi
+        echo "✅ $MSG"
+    fi
+
+# Build the signer binary for x86_64 Linux (Chromebook)
+# Produces a static musl binary that runs on any x86_64 Linux
+build-chromebook-signer:
+    #!/usr/bin/env bash
+    set -eu
+
+    ROOT="{{justfile_directory()}}"
+    TARGET="x86_64-unknown-linux-musl"
+    LINKER="x86_64-linux-musl-gcc"
+
+    echo "Building signer for Chromebook (x86_64 Linux)..."
+    echo ""
+
+    # Check for rustup target
+    if ! rustup target list --installed | grep -q "$TARGET"; then
+        echo "ERROR: Rust target '$TARGET' is not installed." >&2
+        echo "" >&2
+        echo "Install it with:" >&2
+        echo "  rustup target add $TARGET" >&2
+        echo "" >&2
         exit 1
     fi
 
-    MSG="Bootloader signed and pushed"
-    git -C "$WT" commit -m "$MSG"
-    # Push to upstream or set it if missing
-    # Use refs/heads/ prefix to explicitly push to the branch, not a tag
-    if git -C "$WT" rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
-        git -C "$WT" push
-    else
-        git -C "$WT" push -u origin "refs/heads/$VER"
+    # Check for musl-cross linker
+    if ! command -v "$LINKER" &>/dev/null; then
+        echo "ERROR: musl-cross linker '$LINKER' is not installed." >&2
+        echo "" >&2
+        echo "Install it with:" >&2
+        echo "  brew install filosottile/musl-cross/musl-cross" >&2
+        echo "" >&2
+        exit 1
     fi
 
-    echo "✅ $MSG"
+    echo "✓ Rust target '$TARGET' is installed"
+    echo "✓ musl-cross linker '$LINKER' is installed"
+    echo ""
+
+    # Build the signer
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="$LINKER" \
+        cargo build --release -p signer --target "$TARGET"
+
+    OUTPUT="$ROOT/target/$TARGET/release/signer"
+    if [ -f "$OUTPUT" ]; then
+        SIZE=$(du -h "$OUTPUT" | cut -f1)
+        echo ""
+        echo "✅ Build complete!"
+        echo ""
+        echo "Binary: $OUTPUT"
+        echo "Size:   $SIZE"
+        echo ""
+        echo "Copy this file to your Chromebook along with cosign2."
+    else
+        echo "ERROR: Build failed - output binary not found" >&2
+        exit 1
+    fi
 
 # NUCLEAR OPTION: Completely remove a release version (branches, tags, worktrees)
 # Usage: just nuke-release 1.1.0 (or just remove-release 1.1.0)
