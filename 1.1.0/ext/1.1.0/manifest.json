@@ -1,0 +1,393 @@
+{
+  "version": "v1.1.0",
+  "files": [
+    {
+      "name": "1.1.0/keyos/app.bin",
+      "hash": "c37231abc78fe3c2a6ca05c01643429c069d326b283876d34d2ae77cc9e6a6e6"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-onboarding/app.elf",
+      "hash": "496f3d75c69438dcee54a5f73636ec3fb5e280ed511250f5643e123c22e3f27c"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-onboarding/manifest.json",
+      "hash": "82f9b4dce1cfe038eda8a67333109ce76420084df802e547a8ca4943976d7081"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-authenticator/app.elf",
+      "hash": "ff4be57a41f7887976e16a98bb9b03269393c3bc08aa79c2480dc32085aca857"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-authenticator/manifest.json",
+      "hash": "410f6f0453ebbe473314e54b720f6f6d333f822279fb5041082610bcd41d25fd"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-alerts/app.elf",
+      "hash": "e1d1269f1235b0cdf56c1e9c9e59d9d0a84079de74e6b3555dd4534325929931"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-alerts/manifest.json",
+      "hash": "9b2417a5f337ce56c44f95f53bf3105e355db9fcfe172e4eb7535a9cde450781"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-settings/app.elf",
+      "hash": "71bac9f359db4dbb0b02b59f959d69a7e75da2ec53afb3beb7dc439c6491b45c"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-settings/manifest.json",
+      "hash": "d675794b8895a6a994ca4dcd32347be43a2270621b0c88d2b74ab7a54b742e0d"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-file-browser/app.elf",
+      "hash": "1b9085c4d64b2592dcf882d461ac5bdfd81f8c4102ed54adfa76c3d37e6b58be"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-file-browser/manifest.json",
+      "hash": "41a0c0651dcf7a44ab32b6060bf0f8e813a5ad9886930e0e05a73a92332c5f18"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-bitcoin/app.elf",
+      "hash": "0a9db0dfaf4b754f39b236c62213baf9a175504bbb41a321394afc6244c49085"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-bitcoin/manifest.json",
+      "hash": "118cfb17d935f90cee9f60e72a7a21feb6e327b22361d926552041c82dbcdc5e"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-security-keys/app.elf",
+      "hash": "33d3912f00451216c978c3530aa7d37e483aebcf0d1ab7ed9f24472f8fb241a8"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-security-keys/manifest.json",
+      "hash": "ab10c61b36679e88f09f00de147bab836db9d2f5d77b5f615f3dc17e14b9e972"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-qr-scanner/app.elf",
+      "hash": "fa54b94c219f6eae12d9ca1a863bf6528d9ca689d167de84076419f590928c40"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-qr-scanner/manifest.json",
+      "hash": "cc66fb1e789086125d54e4d924391fbfd40730ae0907751405a0453a2bcd6f5f"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-seed-vault/app.elf",
+      "hash": "b7da852e23bafa9c33584457b75c501930eceafb427ba63fba1d656a61dd9b1f"
+    },
+    {
+      "name": "1.1.0/keyos/apps/gui-app-seed-vault/manifest.json",
+      "hash": "101ec5befc4c9b438ce4024f88d78456a834796b6252f852acd6a931e84bd961"
+    },
+    {
+      "name": "1.1.0/keyos/common/icon_set.bin",
+      "hash": "3bcc4b51abc16436d7083c7b13aa089641601c0db96e302414c17fb90033f5a9"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/bg-slider.raw",
+      "hash": "7fda90b88a2997ca25be6c53eebf90c50bf5ba70c614c0b50b6658a8df23b7e0"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/shield-top-alpha-mask.raw",
+      "hash": "9476312cc74fa18558a7c6ca32781e196fc10bb3d36cbf034dd45d9407f7b313"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/screen-heading-shield.raw",
+      "hash": "9e1427abf07eea32b8ee21cfb1228494e186ad838fb5f5314d824abbf84b07b2"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/logo.raw",
+      "hash": "4b85151987255cfd1cf608fd929134c28916bafba3ed99004ee923398044ee1e"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/manual-backup-dark.raw",
+      "hash": "bad1ff195c6c5af9ad8c11d237bd73dba0019b1b370545017967e5b677c127d5"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/restore-dark.raw",
+      "hash": "8994e995908aeb9847fa59795acbb872bdfb68cec83a86f4eb65e0575636478b"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/quantum.raw",
+      "hash": "8834583976d30a9486aa10ffa5564891e9210077c13c153bd72a836cf92cd468"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/quantum-dark.raw",
+      "hash": "758a54011472eef6ed6b838ec4b1acb2db601df7214c5022948f5e25cecebcd6"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/keydelete.raw",
+      "hash": "cebfba856d65199230be94920349b06e7948ab8a144d053739a8b780fbd91b89"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/restore.raw",
+      "hash": "8cfedadbddf4b64ac614e0cc28aecbefa761d43ea3e7ca7cf289bf2e8f039602"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/tempseed.raw",
+      "hash": "bed6185678c5bd00a1a5f663122e36af901e73a4d95d3b01f7f900a642ab78de"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/pin-dark.raw",
+      "hash": "da358f3315003253af53355db00bf013f5e4350fda6b3503aa1101d8ace3e5c5"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/update-dark.raw",
+      "hash": "ec59b666196b549215aa475c621272b4d9f5562f18716389378d0a1949f78ada"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/shield-bt.raw",
+      "hash": "af3da5efbd928ee277aa3e97d87a56d3a8bdd0b8055c04797b35f62ccc2f6be4"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/magic-backup-dark.raw",
+      "hash": "3378dbce68efc849931936995e57d0a017b0871a315b14fc1f31afa003e5f3ff"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/manual-backup.raw",
+      "hash": "568e409ae3d8b73924c2d78a80ba6e8303dfa416ab36e40915ad837a88d72c9b"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/master-key-separated-dark.raw",
+      "hash": "2ca8aa199e5835ab1488acd21ac078072317382a3fcb5dd7fb10e86f7b14a9fc"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/update.raw",
+      "hash": "86a809838b41630937584051826b93dbc5e94c449296cf6c77d1d0a0d973ee3f"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/shield-x.raw",
+      "hash": "6b5c6afdd6a2029ec794a9ea1cc5e9d219e822c1b844a63b27de8657001bc02c"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/shield-x-dark.raw",
+      "hash": "3059e4b8cbbb920379a78e8a7fb7b2604bd0412b901630864e3d368af30336fa"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/pin.raw",
+      "hash": "ba10c116c8e24fa29c5e45d01306ca37bb6b82295c335a4f9962e3b97012c102"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/master-key-dark.raw",
+      "hash": "ff280d616515a286b8bf52583b266969cf40b70aa38772a2e0be93098cda0f36"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/shield-bt-dark.raw",
+      "hash": "203868261887e7a3091bb48491764192175adfb6a33646d4b34ca0c0b10babe9"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/magic-backup.raw",
+      "hash": "785c35ba3141b7ee5b5bac082d456ffa9f4c3cd4ec52b63c809d1a8ec8aece0a"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/prime.raw",
+      "hash": "2b004a47c96b71268800d04f74f90c7a570c4739e09226876e04e875ff881937"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/prime-dark.raw",
+      "hash": "83445c04783e36089b8347583c2a3709a2241ce89b652814091ef287897052b6"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/tempseed-dark.raw",
+      "hash": "7f0f2691aa6547532459e54b270ea691bbb454e0b8294baa2c03407ed6d83232"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/master-key-separated.raw",
+      "hash": "97699c67c23e498d9fc5eca594059346743cfd0546905cfefeddd82e48de93c3"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/keydelete-dark.raw",
+      "hash": "1e573fe9289073486c8af73fed2f615616c27d2e86c5622eccf0378bb1c4d4b0"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/three-d/master-key.raw",
+      "hash": "90e3c4b80b27aff959be737e582368d0fafaa779952ed45e10e01b4b51be5114"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/jumbo-download-dark.raw",
+      "hash": "e4842c8111427038513be2c380e3d31d3b3d71801b8ed1f4567abff0ef66b811"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/jumbo-shield.raw",
+      "hash": "fe4f248a2eaab9c7484d67f6591e069d934f8974bd8ccf42cf8ab5693d956c85"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/card-circle-shadow-64.raw",
+      "hash": "9aa6efd607227347743588a95cd336a45b04f753a8ea049640e00cbee6b721e3"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/shield-top-alpha-mask-dark.raw",
+      "hash": "a7e5f0369794b9e7b10b48066a198c87b55c806e97f01dd7703ace67d58b2e0e"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/background-dark.raw",
+      "hash": "946a7855413f48099a140aa0f3b1247dc3c87c9676202a8809083f5ebe707bc3"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/jumbo-circle-xl-dark.raw",
+      "hash": "bea0d6c8a3bb932ec72ad67d6550bea68b49e0b79ee412fd4187e2eeb4a707f9"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/scan-qr-btn.raw",
+      "hash": "a67f894effeb10ac0462af4d24ef854578ad35e10edc4d800f5afa72566462de"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/jumbo-shield-dark.raw",
+      "hash": "21b1f84459bfad037522aef78eaab150ceda90876bf303ab795dfe152482dca9"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/slide-to-bg-dark.raw",
+      "hash": "d0dd5104bddff5ad9ecccbb806142c977c17a3764073327845b8c1dd39520651"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/jumbo-circle.raw",
+      "hash": "fa1e4de7bcdb5dabe5664ce8db4902dfd3052b34bb234fc8b9449ebb8058b8af"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/regulatory.raw",
+      "hash": "d731ff9f427c673d7e6d340b04d34efb3ba83d8a77002f64fd73496411027563"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/brand-foundation.raw",
+      "hash": "56b375e15ae000fcb254ae86b40b4c40dc3b84e69bff235dbdbb6fcafde26776"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/logo-light.raw",
+      "hash": "137c153ab221c2f98341a8ab775258159d10a4c75972884edb362b0400b40e2b"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/shield-bg.raw",
+      "hash": "a9080b92e3aa2d15e69b38c6cf0d02bc847e4fe56a1406041bf75255b7a94e0a"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/battery.raw",
+      "hash": "ba3dd0325b3a78883807557e62276efaced290501d3cd40b01cdcd182bc091ce"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/bg-gradient-recovery.raw",
+      "hash": "8ab46bede39fa87163c7e25fa8c44bfe0f06257d3d10bd4268a42c320f1b9994"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/tap-keycard.raw",
+      "hash": "e6638c7a482698083d1adc57812701edcefd26e50988660cf6fc087816c07736"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/slide-to-target-dark.raw",
+      "hash": "825bc87bf5d2bfd6a4785ef2ccff10028347769783d696ff51ae26946eb53bbd"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/manage-keys.raw",
+      "hash": "2f554162a37d98d0c7bb31b5b19a428488954af5d1a84fd29623de1bc24922ea"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/logo-dark.raw",
+      "hash": "9617c62e77a0a7af89b2ccd40b03be790d68536c8c356635ed56a25cf1260553"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/shield-bottom-alpha-mask-dark.raw",
+      "hash": "423ca79de99f1eece0754ab4490696f4bad07d8ec6c742a23472f602f11bb4cf"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/diagonal-lines.raw",
+      "hash": "ff3ed2b0c00fafee7bd664535287ab2b782b69d80ba488052c46975e1feb3a77"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/jumbo-circle-dark.raw",
+      "hash": "dcf33f1ab385dca4e96a7295de2aee399677730077dd85913be0f030bd24cd93"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/shield-bottom-alpha-mask.raw",
+      "hash": "6b7c626abba7dc7af3587e0cf797c10392a2bc103549483bfb7ac5eb5d1510f9"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/brand-foundation-dark.raw",
+      "hash": "b432c3a4544c0de70a2f0858f647367dae5c0ed282201cff1cf6bd8d6087306d"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/jumbo-circle-xl.raw",
+      "hash": "3856a1e74148dc0a53c53613aaac580847fc05e99b9e61c315bbde6c924b5452"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/shadow-l1.raw",
+      "hash": "c37c84e5a763e0d163b866161ec1b5499e81eded55747b943116802f721faf87"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/jumbo-download.raw",
+      "hash": "647150a122919cbc15a2456fc7c938dd0ebe854654768af15904cef7cc05b8bb"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/shadow-l3.raw",
+      "hash": "6ef5817292f64dac78a67196e370b18b3469138584a4cc7aaf9c01073e9a84df"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/backup-setup.raw",
+      "hash": "2026ce42038eb21e9e8a1ba0fcee0b6b99dc1b4babe78f4ee8b6de58180dc3da"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/shadow-l2.raw",
+      "hash": "d482d6b01257bca1f957056fbe295397c4a64216d29b4a984255a2dd7955cffc"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/slide-to-target-light.raw",
+      "hash": "7b4e336be16798eaaacece143f134c199b193e5d32b84105e3613f70bb9d69e5"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/shadow-l6.raw",
+      "hash": "a31bb8cbfdd5e1fa401756b6f1097a96b14b645c7abfba36b3a3daf043b6c835"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/bitcoin-graph.raw",
+      "hash": "6f2bab3fb3ad48c0309af371eadba5ffc9b6e5eef1d9213156d6bcc2f688a4a7"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/glow.raw",
+      "hash": "0577bca3d17da0a3a176a3aa71b884c94b5d2efbb4290648dc39c6e373456b14"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/background.raw",
+      "hash": "e73dc1ede1f04a3242832d0cb4600c27606ba44ed4e5c922cbb7b85330c1930d"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/save-settings.raw",
+      "hash": "bcc69de9f4e0b8b2dfef801bf1a354828e14a37925a82ad5b06b0661d43e35a0"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/card-circle-shadow.raw",
+      "hash": "ac970049a64a59705e580c23b945aafceb8959d1a6435dce6a8bf53926ae8c98"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/slide-to-bg-light.raw",
+      "hash": "0840de6d6afe2ca50487c4e808ecb47625e4ea476ae540f8579fd099a6e10ab0"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/shadow-l5.raw",
+      "hash": "739b7b77461759a7d78e49159957c513bb2eef66e05731b7ff2b30d721617d4c"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/nfc-card.raw",
+      "hash": "613078a7caaf00f6e2f37c36964ef94a0e1d99da55c2532bd00e36606e2891d1"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/shield-bg-dark.raw",
+      "hash": "d4e5aaea6b016b4860889618cfd2c6b80f34a3d3cf0b50e536de4f2933d2fd6f"
+    },
+    {
+      "name": "1.1.0/keyos/common/images/shadow-l4.raw",
+      "hash": "bc8586fe3d451b504e8f02cf05f96ee43bc285f561d8367fa69bfa8d7f63b74e"
+    },
+    {
+      "name": "1.1.0/keyos/common/fonts/Montserrat-Medium.ttf",
+      "hash": "d673e6eaf077facbeb86242bf9b2f9ee8ca12c40afe093aa37ee49e81cdbe87c"
+    },
+    {
+      "name": "1.1.0/keyos/common/fonts/Montserrat-Light.ttf",
+      "hash": "f13abb259dcc4abd8726fb32e9fbb624a99fec6f0ebc2fdb52309692e06c8dcf"
+    },
+    {
+      "name": "1.1.0/keyos/common/fonts/SourceCodePro-Regular.ttf",
+      "hash": "ff07004f53a565ec58f9657b2b10aca67a4f0264a309a71972dc2ba7b37d1444"
+    },
+    {
+      "name": "1.1.0/keyos/common/fonts/Montserrat-Regular.ttf",
+      "hash": "3f1c621a622e97d1b21a0c75b2a92d32f3bed0d5593821003578832435a09e0f"
+    }
+  ]
+}
