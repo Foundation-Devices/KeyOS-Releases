@@ -33,7 +33,12 @@ enum SignerError {
 }
 
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    author,
+    version = concat!("v", env!("CARGO_PKG_VERSION")),
+    about = concat!("KeyOS firmware signing tool (v", env!("CARGO_PKG_VERSION"), ")"),
+    long_about = None
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -110,14 +115,11 @@ enum Commands {
 
     /// Sign files from a zip archive and create a new signed zip
     SignZip {
-        /// Version number (e.g., 1.1.0)
-        version: String,
-
         /// Input zip file path
         input: String,
 
-        /// Path to cosign2 configuration file
-        #[arg(default_value = "~/cosign2.toml")]
+        /// Path to cosign2 configuration file (default: cosign2.toml in current directory)
+        #[arg(default_value = "cosign2.toml")]
         config_path: String,
 
         /// Output zip file path (default: {input-basename}-signed.zip)
@@ -149,6 +151,12 @@ struct FileEntry {
 struct Manifest {
     version: String,
     files: Vec<FileEntry>,
+}
+
+/// Version info stored in version.json inside the zip
+#[derive(Serialize, Deserialize)]
+struct VersionInfo {
+    version: String,
 }
 
 struct SignatureStatus {
@@ -223,10 +231,9 @@ fn main() -> Result<()> {
             let output_path = output
                 .clone()
                 .unwrap_or_else(|| format!("KeyOS-v{}.zip", firmware_version));
-            package_release(&version_folder, &output_path)?;
+            package_release(&version_folder, &firmware_version, &output_path)?;
         }
         Commands::SignZip {
-            version,
             input,
             config_path,
             output,
@@ -245,7 +252,7 @@ fn main() -> Result<()> {
                 // Return base name without suffix - sign_zip will add the appropriate suffix
                 format!("{}.zip", clean_stem)
             });
-            sign_zip(version, input, config_path, &output_path, *developer)?;
+            sign_zip(input, config_path, &output_path, *developer)?;
         }
         Commands::Unpack { version, input } => {
             unpack_zip(version, input)?;
@@ -1476,18 +1483,6 @@ fn generate_manifest(
     Ok(())
 }
 
-fn calculate_hash(file_path: &str) -> Result<String> {
-    let mut file =
-        File::open(file_path).context(format!("Failed to open file for hashing: {}", file_path))?;
-
-    let mut hasher = Sha256::new();
-    io::copy(&mut file, &mut hasher)
-        .context(format!("Failed to read file for hashing: {}", file_path))?;
-
-    let hash = hasher.finalize();
-    Ok(hex::encode(hash))
-}
-
 /// Calculate the hash of the binary content only, skipping the cosign2 header.
 /// This matches what the recovery OS expects for signed files.
 const COSIGN2_HEADER_SIZE: usize = 2048;
@@ -1510,7 +1505,7 @@ fn calculate_binary_hash(file_path: &str) -> Result<String> {
     Ok(hex::encode(hash))
 }
 
-fn package_release(version_folder: &str, output_path: &str) -> Result<()> {
+fn package_release(version_folder: &str, firmware_version: &str, output_path: &str) -> Result<()> {
     println!(
         "{}",
         format!("Packaging release files from {}", version_folder).bold()
@@ -1637,20 +1632,30 @@ fn package_release(version_folder: &str, output_path: &str) -> Result<()> {
         println!(" {}", "✓".green());
     }
 
+    // Add version.json to the zip
+    print!("  {} version.json...", "→".blue());
+    let version_info = VersionInfo {
+        version: firmware_version.to_string(),
+    };
+    let version_json = serde_json::to_string_pretty(&version_info)
+        .context("Failed to serialize version.json")?;
+    zip.start_file("version.json", options)?;
+    zip.write_all(version_json.as_bytes())?;
+    println!(" {}", "✓".green());
+
     zip.finish()?;
 
     println!(
         "\n{} {} ({} files)\n",
         "✓".green().bold(),
-        format!("Package created: {}", absolute_path).green().bold(),
-        files_to_package.len()
+        format!("Package created: {}", final_output_path).green().bold(),
+        files_to_package.len() + 1 // +1 for version.json
     );
 
     Ok(())
 }
 
 fn sign_zip(
-    version: &str,
     input_path: &str,
     config_path: &str,
     output_path: &str,
@@ -1673,13 +1678,33 @@ fn sign_zip(
         return Err(SignerError::FileNotFound(format!("Config file: {}", config_path)).into());
     }
 
+    // Read version from version.json in the zip
+    let zip_file = File::open(input_path)
+        .context(format!("Failed to open zip file: {}", input_path))?;
+    let mut archive = ZipArchive::new(zip_file)?;
+
+    let version_info: VersionInfo = {
+        let mut version_file = archive
+            .by_name("version.json")
+            .context("version.json not found in zip file. This zip may have been created with an older version of the signer tool.")?;
+        let mut contents = String::new();
+        version_file
+            .read_to_string(&mut contents)
+            .context("Failed to read version.json")?;
+        serde_json::from_str(&contents).context("Failed to parse version.json")?
+    };
+
+    let version = &version_info.version;
+    let firmware_version = strip_v_prefix(version);
+    println!("  {} Version from zip: {}", "→".blue(), version);
+
     // Create temp directory
     let temp_dir = TempDir::new().context("Failed to create temp directory")?;
     let temp_path = temp_dir.path();
 
     println!("Extracting to temporary directory...");
 
-    // Extract zip to temp dir
+    // Re-open the archive since we consumed it reading version.json
     let zip_file = File::open(input_path)
         .context(format!("Failed to open zip file: {}", input_path))?;
     let mut archive = ZipArchive::new(zip_file)?;
@@ -1704,7 +1729,6 @@ fn sign_zip(
     // Sign the files using existing sign_files function
     let version_folder = temp_path.join(version);
     let version_folder_str = version_folder.to_string_lossy().to_string();
-    let firmware_version = strip_v_prefix(version);
 
     sign_files(&version_folder_str, &expanded_config, &firmware_version, is_developer)?;
 

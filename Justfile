@@ -585,8 +585,11 @@ make-zip VERSION:
         exit 1
     fi
 
-    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- package "$VER" -o "KeyOS-v$VER.zip")
-    echo "Send the zip file to the other signer."
+    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- package "$VER" -o "$VER/KeyOS-v$VER.zip")
+    ZIP_FILE=$(ls -t "$WT/$VER"/KeyOS-v$VER*.zip 2>/dev/null | head -1)
+    if [ -n "$ZIP_FILE" ]; then
+        echo "Zip created: .worktrees/$VER/$VER/$(basename "$ZIP_FILE")"
+    fi
 
 # Unpack a signed zip back into the version folder and commit
 # Usage: just push-zip 1.1.0 /path/to/Release-1.1.0-signed.zip
