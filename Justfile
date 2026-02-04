@@ -65,15 +65,22 @@ create-release BASE_VERSION NEW_VERSION CONFIG_PATH:
     (cd "$NEW_WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- create-recovery-tar "$NEW_VER" "$CFG")
     echo ""
 
-    # Step 4: Create update file
-    echo "Step 4/5: Creating update file..."
-    UPDATE_OUTPUT="$NEW_WT/$NEW_VER/KeyOS-v$BASE_VER-to-v$NEW_VER-Update.tar"
-    cargo run --manifest-path "$ROOT/tools/release-gen/Cargo.toml" -- \
-        "$BASE_VER" "$BASE_WT/$BASE_VER" \
-        "$NEW_VER" "$NEW_WT/$NEW_VER" \
-        --out "$UPDATE_OUTPUT" \
-        --force
-    echo ""
+    # Step 4: Create update file (skip if same version)
+    if [ "$BASE_VER" != "$NEW_VER" ]; then
+        echo "Step 4/5: Creating update file..."
+        UPDATE_OUTPUT="$NEW_WT/$NEW_VER/KeyOS-v$BASE_VER-to-v$NEW_VER-Update.tar"
+        cargo run --manifest-path "$ROOT/tools/release-gen/Cargo.toml" -- \
+            "$BASE_VER" "$BASE_WT/$BASE_VER" \
+            "$NEW_VER" "$NEW_WT/$NEW_VER" \
+            --out "$UPDATE_OUTPUT" \
+            --force
+        echo "Signing update tar with cosign2..."
+        cosign2 sign -c "$CFG" -i "$UPDATE_OUTPUT" --in-place --binary-version "$NEW_VER"
+        echo ""
+    else
+        echo "Step 4/5: Skipping update file (same version for base and new)"
+        echo ""
+    fi
 
     # Step 5: Sign recovery tars
     echo "Step 5/5: Signing recovery tars..."
@@ -101,7 +108,9 @@ create-release BASE_VERSION NEW_VERSION CONFIG_PATH:
     echo "   Factory image: $NEW_WT/$NEW_VER/$OUTPUT"
     echo "   Core system recovery: $NEW_WT/$NEW_VER/KeyOS-v$NEW_VER-CoreSystemRecovery.bin"
     echo "   Recovery: $NEW_WT/$NEW_VER/KeyOS-v$NEW_VER-Recovery.bin"
-    echo "   Update file: $UPDATE_OUTPUT"
+    if [ "$BASE_VER" != "$NEW_VER" ]; then
+        echo "   Update file: $UPDATE_OUTPUT"
+    fi
 
 # Sign individual files with the provided key (uses a dedicated git worktree to avoid switching your current branch)
 sign VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
@@ -421,16 +430,26 @@ validate-dev VERSION:
     (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- validate "$VER" --dev)
 
 # Create an update tar between two versions
-create-update BASE_VERSION NEW_VERSION *EXTRA_ARGS:
+create-update BASE_VERSION NEW_VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml") *EXTRA_ARGS:
     #!/usr/bin/env bash
     set -u
 
     BASE_VER="{{BASE_VERSION}}"
     NEW_VER="{{NEW_VERSION}}"
+    CFG="{{CONFIG_PATH}}"
     ROOT="{{justfile_directory()}}"
     WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
     BASE_WT="$WORKTREES_DIR/$BASE_VER"
     NEW_WT="$WORKTREES_DIR/$NEW_VER"
+
+    # Expand ~ in config path if present
+    if [[ "$CFG" == "~/"* ]]; then
+        CFG="$HOME/${CFG#~/}"
+    fi
+    if [ ! -f "$CFG" ]; then
+        echo "ERROR: Config file not found: $CFG" >&2
+        exit 1
+    fi
 
     # Check if base worktree exists
     if [ ! -d "$BASE_WT" ]; then
@@ -455,6 +474,10 @@ create-update BASE_VERSION NEW_VERSION *EXTRA_ARGS:
         "$NEW_VER" "$NEW_WT/$NEW_VER" \
         --out "$OUTPUT_FILE" \
         {{EXTRA_ARGS}}
+
+    echo "Signing update tar with cosign2..."
+    cosign2 sign -c "$CFG" -i "$OUTPUT_FILE" --in-place --binary-version "$NEW_VER"
+    echo "✅ Update tar created and signed: $OUTPUT_FILE"
 
 # Create a bootable disk image from firmware components (production)
 # Default output: KeyOS-v{VERSION}-Factory.img
@@ -585,8 +608,11 @@ make-zip VERSION:
         exit 1
     fi
 
-    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- package "$VER" -o "KeyOS-v$VER.zip")
-    echo "Send the zip file to the other signer."
+    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- package "$VER" -o "$VER/KeyOS-v$VER.zip")
+    ZIP_FILE=$(ls -t "$WT/$VER"/KeyOS-v$VER*.zip 2>/dev/null | head -1)
+    if [ -n "$ZIP_FILE" ]; then
+        echo "Zip created: .worktrees/$VER/$VER/$(basename "$ZIP_FILE")"
+    fi
 
 # Unpack a signed zip back into the version folder and commit
 # Usage: just push-zip 1.1.0 /path/to/Release-1.1.0-signed.zip
