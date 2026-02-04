@@ -75,7 +75,7 @@ create-release BASE_VERSION NEW_VERSION CONFIG_PATH:
             --out "$UPDATE_OUTPUT" \
             --force
         echo "Signing update tar with cosign2..."
-        cosign2 sign -c "$CFG" -i "$UPDATE_OUTPUT" --developer --in-place --binary-version "$NEW_VER"
+        cosign2 sign -c "$CFG" -i "$UPDATE_OUTPUT" --in-place --binary-version "$NEW_VER"
         echo ""
     else
         echo "Step 4/5: Skipping update file (same version for base and new)"
@@ -476,7 +476,7 @@ create-update BASE_VERSION NEW_VERSION CONFIG_PATH=env_var_or_default("COSIGN_TO
         {{EXTRA_ARGS}}
 
     echo "Signing update tar with cosign2..."
-    cosign2 sign -c "$CFG" -i "$OUTPUT_FILE" --developer --in-place --binary-version "$NEW_VER"
+    cosign2 sign -c "$CFG" -i "$OUTPUT_FILE" --in-place --binary-version "$NEW_VER"
     echo "✅ Update tar created and signed: $OUTPUT_FILE"
 
 # Create a bootable disk image from firmware components (production)

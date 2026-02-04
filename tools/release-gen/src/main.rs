@@ -167,7 +167,13 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
 
     for base_file in &base_src_files {
         if !new_src_files.contains(base_file) {
-            let path = base_file.to_str().expect(PATH_TO_STR_ERROR).to_string();
+            // Strip "keyos/" prefix for device paths (files are at /keyos.update/app.bin, not /keyos.update/keyos/app.bin)
+            let path = base_file
+                .strip_prefix("keyos")
+                .unwrap_or(base_file)
+                .to_str()
+                .expect(PATH_TO_STR_ERROR)
+                .to_string();
             actions.push(Action::Delete { path });
             println!("[INFO] action/delete: {}", base_file.display());
         } else {
@@ -203,13 +209,21 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
                 })?;
                 let patch_size = patch_metadata.len();
 
-                let file = base_file.to_str().expect(PATH_TO_STR_ERROR).to_string();
+                // patch_file keeps keyos/ prefix (file is at /release/patch/keyos/app.bin)
+                let patch_file_path = base_file.to_str().expect(PATH_TO_STR_ERROR).to_string();
+                // patch_source strips keyos/ prefix (device file is at /keyos.update/app.bin)
+                let patch_source_path = base_file
+                    .strip_prefix("keyos")
+                    .unwrap_or(base_file)
+                    .to_str()
+                    .expect(PATH_TO_STR_ERROR)
+                    .to_string();
 
                 actions.push(Action::Patch {
-                    patch_file: file.clone(),
-                    patch_source: file,
-                    base_version: args.base_version.clone(),
-                    new_version: args.new_version.clone(),
+                    patch_file: patch_file_path,
+                    patch_source: patch_source_path,
+                    base_version: format!("v{}", args.base_version),
+                    new_version: format!("v{}", args.new_version),
                 });
                 println!(
                     "[INFO] action/patch ({}): {}",
@@ -233,7 +247,15 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
             let mut out_file = fs::File::create_new(&patch_file_path)
                 .with_context(|| format!("Creating patch file: {}", abs_path(&patch_file_path)))?;
 
-            let file_path = new_file.to_str().expect(PATH_TO_STR_ERROR).to_string();
+            // source keeps keyos/ prefix (file is at /release/patch/keyos/app.bin)
+            let source_path = new_file.to_str().expect(PATH_TO_STR_ERROR).to_string();
+            // dest strips keyos/ prefix (device file is at /keyos.update/app.bin)
+            let dest_path = new_file
+                .strip_prefix("keyos")
+                .unwrap_or(new_file)
+                .to_str()
+                .expect(PATH_TO_STR_ERROR)
+                .to_string();
             io::copy(&mut source_file, &mut out_file).with_context(|| {
                 format!(
                     "Copying file from {} to {}",
@@ -242,8 +264,8 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
                 )
             })?;
             actions.push(Action::Add {
-                source: file_path.clone(),
-                dest: file_path,
+                source: source_path,
+                dest: dest_path,
             });
             println!("[INFO] action/add: {}", new_file.display());
         }
