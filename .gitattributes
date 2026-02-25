@@ -3,3 +3,5 @@
 *.tar.gz filter=lfs diff=lfs merge=lfs -text
 *.tar.xz filter=lfs diff=lfs merge=lfs -text
 **/Update filter=lfs diff=lfs merge=lfs -text
+**/KeyOS-v*-Recovery.bin filter=lfs diff=lfs merge=lfs -text
+**/KeyOS-v*-CoreSystemRecovery.bin filter=lfs diff=lfs merge=lfs -text
