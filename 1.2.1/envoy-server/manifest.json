@@ -1,0 +1,9 @@
+{
+"baseVersion": "1.2.0",
+"version": "1.2.1",
+"signedSha256": "e9138efcc45740eccea1125cc60c33e2b6552fc45ba462470c60b9685d473e03",
+"unsignedSha256": "25abc35f1a4c68509a90d8aea8e0bf7b4fe3c7e52b695c3daf286cc63ae001ca",
+"updateFilename": "release.tar",
+"signatureFilename": "release.tar.sig",
+"releaseDate": "2026-03-10"
+}
