@@ -82,6 +82,20 @@ info() {
     echo -e "\033[1;32mINFO\033[0m $1"
 }
 
+require_dir() {
+    if [ ! -d "$1" ]; then
+        error "directory '$1' does not exist."
+        exit 1
+    fi
+}
+
+require_file() {
+    if [ ! -f "$1" ]; then
+        error "file '$1' does not exist."
+        exit 1
+    fi
+}
+
 if [ ! -d .git ] || [ ! -f .git/config ] || ! grep -q "Foundation-Devices/KeyOS-Releases" .git/config; then
     error "please run the script from the root of the 'KeyOS-Releases' repository"
     exit 1
@@ -124,24 +138,22 @@ if [ -f release.tar ] || [ -f boot.img ]; then
     fi
 fi
 
-if [ ! -d "$OLD_VERSION_DIR" ]; then
-    error "directory '$OLD_VERSION_DIR' does not exist."
-    exit 1
-fi
-if [ ! -d "$NEW_VERSION_DIR" ]; then
-    error "directory '$NEW_VERSION_DIR' does not exist."
-    exit 1
-fi
-if [ ! -f "$COSIGN2_CONFIG" ]; then
-    error "file '$COSIGN2_CONFIG' does not exist."
-    exit 1
-fi
+require_file "$COSIGN2_CONFIG"
 
 if [ ! -d "$KEYOS_DIR" ]; then
     error "keyos project not found at '$(realpath -m -q "$KEYOS_DIR")'. \
 Please clone it from https://github.com/Foundation-Devices/keyos"
     exit 1
 fi
+
+OLD_KEYOS_DIR="$OLD_VERSION_DIR/keyos"
+NEW_KEYOS_DIR="$NEW_VERSION_DIR/keyos"
+
+for version_dir in "$OLD_VERSION_DIR" "$NEW_VERSION_DIR"; do
+    require_dir "$version_dir/keyos"
+    require_file "$version_dir/keyos/app.bin"
+    require_dir "$version_dir/keyos/apps"
+done
 
 # Strip path to get the versions only.
 OLD_VERSION=${OLD_VERSION_DIR##*/}
@@ -156,9 +168,19 @@ NEW_VERSION_NO_V=${NEW_VERSION#v}
 
 info "signing files"
 
-# Run the `signer` tool to sign both versions.
-cargo run --release -p signer -- sign-files "$OLD_VERSION" "$COSIGN2_CONFIG" --developer || true
-cargo run --release -p signer -- sign-files "$NEW_VERSION" "$COSIGN2_CONFIG" --developer || true
+sign_keyos_files() {
+    local version=$1
+    local keyos_dir=$2
+
+    cosign2 sign -c "$COSIGN2_CONFIG" -i "$keyos_dir/app.bin" --developer --in-place --binary-version "$version"
+
+    while IFS= read -r -d '' app_elf; do
+        cosign2 sign -c "$COSIGN2_CONFIG" -i "$app_elf" --developer --in-place --binary-version "$version"
+    done < <(find "$keyos_dir/apps" -mindepth 2 -maxdepth 2 -type f -name app.elf -print0)
+}
+
+sign_keyos_files "$OLD_VERSION_NO_V" "$OLD_KEYOS_DIR"
+sign_keyos_files "$NEW_VERSION_NO_V" "$NEW_KEYOS_DIR"
 
 info "creating release tarball"
 
@@ -198,8 +220,8 @@ EOF
 info "creating 'boot.img'"
 
 # Restore old files and combine them into the image.
-cp "$OLD_VERSION_DIR/app.bin" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images"
-cp -r "$OLD_VERSION_DIR/apps" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release"
+cp "$OLD_KEYOS_DIR/app.bin" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images"
+cp -r "$OLD_KEYOS_DIR/apps" "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release"
 
 cd "$KEYOS_DIR"
 

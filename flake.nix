@@ -5,7 +5,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    keyos.url = "git+ssh://git@github.com/Foundation-Devices/KeyOS";
+    keyos.url = "git+ssh://git@github.com/Foundation-Devices/KeyOS-dev";
     updiff = {
       url = "git+ssh://git@github.com/Foundation-Devices/updiff";
       flake = false;

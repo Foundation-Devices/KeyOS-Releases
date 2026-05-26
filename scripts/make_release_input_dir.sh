@@ -91,6 +91,7 @@ cd "$START_DIR"
 
 info "preparing release input directory"
 mkdir "$FIRMWARE_VERSION"
+mkdir "$FIRMWARE_VERSION/keyos"
 
 COMMITS_FILE="$START_DIR/keyos-commits.txt"
 if [ -f "$COMMITS_FILE" ]; then
@@ -100,7 +101,7 @@ if [ -f "$COMMITS_FILE" ]; then
 fi
 echo "$FIRMWARE_VERSION $KEYOS_COMMIT" >> "$COMMITS_FILE"
 
-cp "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images/app.bin" "$FIRMWARE_VERSION"
-cp -r "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/apps/" "$FIRMWARE_VERSION"
+cp "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images/app.bin" "$FIRMWARE_VERSION/keyos"
+cp -r "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/apps/" "$FIRMWARE_VERSION/keyos"
 
 info "done"
