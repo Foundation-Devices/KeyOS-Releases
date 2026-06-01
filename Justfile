@@ -69,13 +69,53 @@ create-release BASE_VERSION NEW_VERSION CONFIG_PATH:
     if [ "$BASE_VER" != "$NEW_VER" ]; then
         echo "Step 4/5: Creating update file..."
         UPDATE_OUTPUT="$NEW_WT/$NEW_VER/KeyOS-v$BASE_VER-to-v$NEW_VER-Update.tar"
+        UPDATE_ENVOY_DIR="$NEW_WT/$NEW_VER/envoy-server"
+        UPDATE_COPY_PATH="$UPDATE_ENVOY_DIR/release.tar"
+        UPDATE_SIG_PATH="$UPDATE_ENVOY_DIR/release.tar.sig"
+        UPDATE_MANIFEST_PATH="$UPDATE_ENVOY_DIR/manifest.json"
+
         cargo run --manifest-path "$ROOT/tools/release-gen/Cargo.toml" -- \
             "$BASE_VER" "$BASE_WT/$BASE_VER" \
             "$NEW_VER" "$NEW_WT/$NEW_VER" \
             --out "$UPDATE_OUTPUT" \
             --force
+
+        echo "Calculating update tar hash before cosign2 signing..."
+        UNSIGNED_SHA256="$(sha256sum "$UPDATE_OUTPUT" | awk '{print $1}')"
+
         echo "Signing update tar with cosign2..."
         cosign2 sign -c "$CFG" -i "$UPDATE_OUTPUT" --in-place --binary-version "$NEW_VER"
+
+        echo "Calculating update tar hash after cosign2 signing..."
+        SIGNED_SHA256="$(sha256sum "$UPDATE_OUTPUT" | awk '{print $1}')"
+
+        echo "Reading release date from cosign2 header..."
+        COSIGN_DUMP="$(NO_COLOR=1 cosign2 dump --input "$UPDATE_OUTPUT")"
+        RELEASE_TIMESTAMP="$(printf '%s\n' "$COSIGN_DUMP" | sed -nE 's/^[[:space:]]*timestamp[[:space:]]+.*\(([0-9]+)\).*$/\1/p')"
+        if [ -z "$RELEASE_TIMESTAMP" ]; then
+            echo "ERROR: Failed to parse timestamp from cosign2 header for $UPDATE_OUTPUT" >&2
+            exit 1
+        fi
+        RELEASE_DATE="$(date -u -d "@$RELEASE_TIMESTAMP" +%Y-%m-%d)"
+
+        echo "Copying update artifacts to envoy-server..."
+        mkdir -p "$UPDATE_ENVOY_DIR"
+        cp "$UPDATE_OUTPUT" "$UPDATE_COPY_PATH"
+
+        echo "Creating detached GPG signature..."
+        (cd "$UPDATE_ENVOY_DIR" && rm -f "release.tar.sig" && gpg --detach-sign "release.tar")
+
+        echo "Generating envoy-server manifest..."
+        printf '%s\n' \
+            '{' \
+            "\"baseVersion\": \"$BASE_VER\"," \
+            "\"version\": \"$NEW_VER\"," \
+            "\"signedSha256\": \"$SIGNED_SHA256\"," \
+            "\"unsignedSha256\": \"$UNSIGNED_SHA256\"," \
+            '"updateFilename": "release.tar",' \
+            '"signatureFilename": "release.tar.sig",' \
+            "\"releaseDate\": \"$RELEASE_DATE\"" \
+            '}' > "$UPDATE_MANIFEST_PATH"
         echo ""
     else
         echo "Step 4/5: Skipping update file (same version for base and new)"
@@ -110,6 +150,9 @@ create-release BASE_VERSION NEW_VERSION CONFIG_PATH:
     echo "   Recovery: $NEW_WT/$NEW_VER/KeyOS-v$NEW_VER-Recovery.bin"
     if [ "$BASE_VER" != "$NEW_VER" ]; then
         echo "   Update file: $UPDATE_OUTPUT"
+        echo "   Envoy update tar: $UPDATE_COPY_PATH"
+        echo "   Envoy signature: $UPDATE_SIG_PATH"
+        echo "   Envoy manifest: $UPDATE_MANIFEST_PATH"
     fi
 
 # Sign individual files with the provided key (uses a dedicated git worktree to avoid switching your current branch)
