@@ -225,6 +225,7 @@ cat > "$UPDATE_DIR/manifest.json" <<EOF
 	"unsignedSha256": "${UNSIGNED_SHA256}",
 	"updateFilename": "${UPDATE_FILENAME}",
 	"signatureFilename": "${SIGNATURE_FILENAME}",
+	"changelog": "",
 	"releaseDate": "${RELEASE_DATE}"
 }
 EOF
