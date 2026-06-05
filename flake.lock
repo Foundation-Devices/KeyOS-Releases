@@ -100,11 +100,11 @@
     "updiff": {
       "flake": false,
       "locked": {
-        "lastModified": 1770396717,
-        "narHash": "sha256-jkF8dbn/OqLypuTO1hPdjJYI4Pt5C14kVGcjLmAPdi0=",
+        "lastModified": 1780490792,
+        "narHash": "sha256-SWuitw8zBWEMW56VNy65AG1R+ykFDSiBzZ67BgySB+E=",
         "ref": "refs/heads/main",
-        "rev": "7449ea2a773725a2ccd1897f54fd1d7543b3d07e",
-        "revCount": 12,
+        "rev": "608d85f3eee356eaec5d33b75a2af446b57156ca",
+        "revCount": 14,
         "type": "git",
         "url": "ssh://git@github.com/Foundation-Devices/updiff"
       },
