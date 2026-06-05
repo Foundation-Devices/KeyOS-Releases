@@ -168,14 +168,26 @@ NEW_VERSION_NO_V=${NEW_VERSION#v}
 
 info "signing files"
 
+sign_keyos_file() {
+    local version=$1
+    local file=$2
+
+    if cosign2 dump --input "$file" >/dev/null 2>&1; then
+        info "skipping already signed file: $file"
+        return
+    fi
+
+    cosign2 sign -c "$COSIGN2_CONFIG" -i "$file" --developer --in-place --binary-version "$version"
+}
+
 sign_keyos_files() {
     local version=$1
     local keyos_dir=$2
 
-    cosign2 sign -c "$COSIGN2_CONFIG" -i "$keyos_dir/app.bin" --developer --in-place --binary-version "$version"
+    sign_keyos_file "$version" "$keyos_dir/app.bin"
 
     while IFS= read -r -d '' app_elf; do
-        cosign2 sign -c "$COSIGN2_CONFIG" -i "$app_elf" --developer --in-place --binary-version "$version"
+        sign_keyos_file "$version" "$app_elf"
     done < <(find "$keyos_dir/apps" -mindepth 2 -maxdepth 2 -type f -name app.elf -print0)
 }
 
