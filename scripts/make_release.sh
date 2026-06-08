@@ -10,7 +10,7 @@
 # Both files will be generated in the directory where the script is run from.
 #
 # The third argument is the path to the `cosign2.toml` configuration file that will be used when
-# signing various files.
+# signing the release tarball.
 #
 # The fourth argument is the path to the `keyos` repository. This argument is optional and, if
 # not provided, the script will assume that the `keyos` repository is in the same directory as
@@ -57,7 +57,8 @@
 #
 # > cargo xtask build-all --dont-sign
 #
-# The `dont-sign` flag is required because we will be signing these files with the `signer` tool.
+# The `dont-sign` flag is required because the `make_release_input_dir.sh` script signs these files
+# with `cosign2` after building them.
 #
 # You can create these directories and manually copy over the firmware components, or you can use
 # use the `make_release_input_dir.sh` bash script to automate this process.
@@ -165,34 +166,6 @@ mkdir -p "$UPDATE_DIR"
 # Strip the 'v'.
 OLD_VERSION_NO_V=${OLD_VERSION#v}
 NEW_VERSION_NO_V=${NEW_VERSION#v}
-
-info "signing files"
-
-sign_keyos_file() {
-    local version=$1
-    local file=$2
-
-    if cosign2 dump --input "$file" >/dev/null 2>&1; then
-        info "skipping already signed file: $file"
-        return
-    fi
-
-    cosign2 sign -c "$COSIGN2_CONFIG" -i "$file" --developer --in-place --binary-version "$version"
-}
-
-sign_keyos_files() {
-    local version=$1
-    local keyos_dir=$2
-
-    sign_keyos_file "$version" "$keyos_dir/app.bin"
-
-    while IFS= read -r -d '' app_elf; do
-        sign_keyos_file "$version" "$app_elf"
-    done < <(find "$keyos_dir/apps" -mindepth 2 -maxdepth 2 -type f -name app.elf -print0)
-}
-
-sign_keyos_files "$OLD_VERSION_NO_V" "$OLD_KEYOS_DIR"
-sign_keyos_files "$NEW_VERSION_NO_V" "$NEW_KEYOS_DIR"
 
 info "creating release tarball"
 

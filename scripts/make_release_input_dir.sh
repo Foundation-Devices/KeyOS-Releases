@@ -10,6 +10,9 @@
 #
 # Requires the `keyos` repository to run. Path to it can be passed as an optional last argument
 # to this script.
+#
+# The second argument is the path to the `cosign2.toml` configuration file that will be used when
+# signing the firmware components.
 
 set -e
 
@@ -36,16 +39,25 @@ if [ ! -d .git ] || [ ! -f .git/config ] || ! grep -q "Foundation-Devices/KeyOS-
     exit 1
 fi
 
-if [ "$#" -ne 1 ] && [ "$#" -ne 2 ]; then
+require_file() {
+    if [ ! -f "$1" ]; then
+        error "file '$1' does not exist."
+        exit 1
+    fi
+}
+
+if [ "$#" -ne 2 ] && [ "$#" -ne 3 ]; then
     error "invalid number of arguments
 
-Usage: make_release_input_dir.sh <firmware_version> [<path_to_keyos_repo>]"
+Usage: make_release_input_dir.sh <firmware_version> <path_to_cosign2_config> [<path_to_keyos_repo>]"
     exit 1
 fi
 
 # Also the output directory.
 FIRMWARE_VERSION=$1
-KEYOS_DIR=${2:-../keyos}
+COSIGN2_CONFIG=$2
+KEYOS_DIR=${3:-../keyos}
+FIRMWARE_VERSION_NO_V=${FIRMWARE_VERSION#v}
 
 START_DIR=$(pwd)
 
@@ -61,6 +73,7 @@ if [ -d "$FIRMWARE_VERSION" ]; then
 fi
 
 info "checking 'keyos' directory"
+require_file "$COSIGN2_CONFIG"
 
 if [ ! -d "$KEYOS_DIR" ]; then
     error "keyos project not found at '$(realpath -m -q "$KEYOS_DIR")'. \
@@ -103,5 +116,19 @@ echo "$FIRMWARE_VERSION $KEYOS_COMMIT" >> "$COMMITS_FILE"
 
 cp "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/images/app.bin" "$FIRMWARE_VERSION/keyos"
 cp -r "$KEYOS_DIR/target/armv7a-unknown-xous-elf/release/apps/" "$FIRMWARE_VERSION/keyos"
+
+info "signing firmware components"
+
+sign_keyos_file() {
+    local file=$1
+
+    cosign2 sign -c "$COSIGN2_CONFIG" -i "$file" --developer --in-place --binary-version "$FIRMWARE_VERSION_NO_V"
+}
+
+sign_keyos_file "$FIRMWARE_VERSION/keyos/app.bin"
+
+while IFS= read -r -d '' app_elf; do
+    sign_keyos_file "$app_elf"
+done < <(find "$FIRMWARE_VERSION/keyos/apps" -mindepth 2 -maxdepth 2 -type f -name app.elf -print0)
 
 info "done"

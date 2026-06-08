@@ -24,16 +24,15 @@ A bash script that automates creation of KeyOS releases, by using the above tool
 
 It takes two versions (old and new) of KeyOS (its firmware components) and performs the following steps:
 
-1. Signs the files in both versions.
+1. Creates a signed release tarball that the KeyOS update service can use to update from the old version to the new.
 2. Creates a bootable disk image for the old version.
-3. Creates a signed release tarball that the KeyOS update service can use to update from the old version to the new.
 
 These two files (the image and the tarball) can be used for a complete E2E test of the update procedure.
 
 #### [make_release_input_dir.sh](./scripts/make_release_input_dir.sh)
 
 A simple bash script that takes a firmware version `vX.Y.Z` as input and generates a directory named `vX.Y.Z` that
-will contain all the necessary firmware components (based on the local `keyos` repository).
+will contain all the necessary signed firmware components (based on the local `keyos` repository).
 
 #### [make_release_for_update_demo.sh](./scripts/make_release_for_update_demo.sh)
 
