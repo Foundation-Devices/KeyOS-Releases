@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # Create a complete release: factory image, recovery tars, update file, sign everything, and commit
-# Usage: just create-release 1.0.0 1.0.1 ~/cosign2.toml
-create-release BASE_VERSION NEW_VERSION CONFIG_PATH:
+# Usage: just create-release 1.0.0 1.0.1 ~/cosign2.toml [--reboot-required]
+create-release BASE_VERSION NEW_VERSION CONFIG_PATH *args:
     #!/usr/bin/env bash
     set -eu
 
@@ -78,7 +78,7 @@ create-release BASE_VERSION NEW_VERSION CONFIG_PATH:
             "$BASE_VER" "$BASE_WT/$BASE_VER" \
             "$NEW_VER" "$NEW_WT/$NEW_VER" \
             --out "$UPDATE_OUTPUT" \
-            --force
+            --force {{args}}
 
         echo "Calculating update tar hash before cosign2 signing..."
         UNSIGNED_SHA256="$(sha256sum "$UPDATE_OUTPUT" | awk '{print $1}')"

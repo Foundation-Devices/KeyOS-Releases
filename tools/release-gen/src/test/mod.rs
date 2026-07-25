@@ -26,9 +26,9 @@ fn release_roundtrip() {
     let updiff_path: PathBuf = std::env::var("UPDIFF_PATH")
         .unwrap_or_else(|_| String::from("updiff"))
         .into();
-    let base_ver = String::from("v0.0.1");
+    let base_ver = String::from("0.0.1");
     let base_dir = PathBuf::from("src/test/fixtures/base/");
-    let new_ver = String::from("v0.0.2");
+    let new_ver = String::from("0.0.2");
     let new_dir = PathBuf::from("src/test/fixtures/new/");
     let out_dir = PathBuf::from("src/test/fixtures/out");
     let out_path = out_dir.join("release.tar");
@@ -73,8 +73,8 @@ fn release_roundtrip() {
                 base_version,
                 new_version,
             } => {
-                assert_eq!(base_version, &base_ver);
-                assert_eq!(new_version, &new_ver);
+                assert_eq!(base_version, &format!("v{}", base_ver));
+                assert_eq!(new_version, &format!("v{}", new_ver));
 
                 let base_file_full = base_dir.join(patch_source);
                 let new_file_full = new_dir.join(patch_source);
