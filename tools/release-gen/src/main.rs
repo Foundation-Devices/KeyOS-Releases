@@ -61,6 +61,28 @@ fn main() -> anyhow::Result<()> {
     run(args)
 }
 
+fn ota_patch_version(version: &str) -> anyhow::Result<String> {
+    let version = version.strip_prefix('v').unwrap_or(version);
+
+    let Some((base, prerelease)) = version.split_once('-') else {
+        return Ok(version.to_string());
+    };
+
+    let beta = prerelease
+        .strip_prefix("beta.")
+        .or_else(|| prerelease.strip_prefix("beta"));
+
+    if let Some(beta) = beta {
+        if !beta.is_empty() && beta.chars().all(|c| c.is_ascii_digit()) {
+            return Ok(format!("{base}b{beta}"));
+        }
+    }
+
+    anyhow::bail!(
+        "unsupported prerelease version '{version}' for OTA patches; use x.y.z or x.y.z-betaN"
+    );
+}
+
 pub fn run(args: Args) -> anyhow::Result<()> {
     println!("[INFO] verifying `updiff` tool access");
 
@@ -75,6 +97,9 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
             anyhow::bail!("could not run updiff tool: {}", err.to_string());
         }
     }
+
+    let base_patch_version = ota_patch_version(&args.base_version)?;
+    let new_patch_version = ota_patch_version(&args.new_version)?;
 
     println!("[INFO] setting up output directory");
 
@@ -189,9 +214,9 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
                     .with_context(|| format!("Creating dir: {}", abs_path(patch_file_parent)))?;
 
                 let output = Command::new(args.updiff_path.as_os_str())
-                    .arg(&args.base_version)
+                    .arg(&base_patch_version)
                     .arg(base_file_full)
-                    .arg(&args.new_version)
+                    .arg(&new_patch_version)
                     .arg(new_file_full)
                     .arg(&patch_file)
                     .arg("--force")
@@ -222,8 +247,8 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
                 actions.push(Action::Patch {
                     patch_file: patch_file_path,
                     patch_source: patch_source_path,
-                    base_version: format!("v{}", args.base_version),
-                    new_version: format!("v{}", args.new_version),
+                    base_version: format!("v{}", base_patch_version),
+                    new_version: format!("v{}", new_patch_version),
                 });
                 println!(
                     "[INFO] action/patch ({}): {}",
