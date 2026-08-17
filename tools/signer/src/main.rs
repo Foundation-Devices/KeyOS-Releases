@@ -175,6 +175,7 @@ struct SignatureStatus {
     has_header: bool,
     has_first_signature: bool,
     has_second_signature: bool,
+    version: Option<String>,
 }
 
 impl SignatureStatus {
@@ -293,6 +294,7 @@ const MAX_APP_BUNDLE_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Deserialize)]
 struct AppArchiveManifest {
+    version: Option<String>,
     #[serde(rename = "fileHashes")]
     file_hashes: BTreeMap<String, String>,
 }
@@ -316,14 +318,13 @@ fn collect_app_bundles(apps_dir: &Path) -> Result<Vec<(std::path::PathBuf, std::
     Ok(apps)
 }
 
-fn app_manifest_hashed_files(bundle_dir: &Path) -> Result<Vec<String>> {
-    let manifest_path = bundle_dir.join(APP_MANIFEST_FILE);
+fn read_app_manifest(manifest_path: &Path) -> Result<AppArchiveManifest> {
     let bytes = fs::read(&manifest_path)
         .with_context(|| format!("Failed to read app manifest {}", manifest_path.display()))?;
 
     // Release preparation emits plain JSON. Each signer subsequently adds or updates the fixed
     // cosign2 header, so accept either representation for signing-zip transport and final packing.
-    let manifest: AppArchiveManifest = serde_json::from_slice(&bytes)
+    serde_json::from_slice(&bytes)
         .or_else(|_| {
             let json = bytes.get(COSIGN2_HEADER_SIZE..).ok_or_else(|| {
                 serde_json::Error::io(io::Error::new(
@@ -333,7 +334,12 @@ fn app_manifest_hashed_files(bundle_dir: &Path) -> Result<Vec<String>> {
             })?;
             serde_json::from_slice(json)
         })
-        .with_context(|| format!("Failed to parse fileHashes from {}", manifest_path.display()))?;
+        .with_context(|| format!("Failed to parse app manifest {}", manifest_path.display()))
+}
+
+fn app_manifest_hashed_files(bundle_dir: &Path) -> Result<Vec<String>> {
+    let manifest_path = bundle_dir.join(APP_MANIFEST_FILE);
+    let manifest = read_app_manifest(&manifest_path)?;
 
     let mut names: Vec<String> = manifest.file_hashes.into_keys().collect();
     names.sort_unstable();
@@ -525,16 +531,27 @@ fn sign_file_if_needed(
     file_path: &Path,
     description: &str,
     config_path: &str,
-    firmware_version: &str,
+    binary_version: &str,
     is_developer: bool,
 ) -> Result<()> {
     let file_path_str = file_path
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("File path is not valid UTF-8: {}", file_path.display()))?;
 
+    let status = check_signatures_quiet(file_path_str)?;
+    if status.has_header {
+        anyhow::ensure!(
+            status.version.as_deref() == Some(binary_version),
+            "{} has cosign2 version {:?}, expected {:?}; rebuild it from the unsigned artifact",
+            file_path.display(),
+            status.version.as_deref().unwrap_or("<missing>"),
+            binary_version
+        );
+    }
+
     // Production signing is resumable so a partially signed release can be completed without
     // attempting to add a third signature to files that are already complete.
-    if !is_developer && check_signatures_quiet(file_path_str)?.has_second_signature {
+    if !is_developer && status.has_second_signature {
         println!("Skipping {} (already has two signatures)", description);
         return Ok(());
     }
@@ -548,7 +565,7 @@ fn sign_file_if_needed(
         config_path,
         "--in-place",
         "--binary-version",
-        firmware_version,
+        binary_version,
     ];
     if is_developer {
         args.push("--developer");
@@ -628,19 +645,53 @@ fn sign_files(
 
         let apps = collect_app_bundles(&apps_path)?;
         println!("Found {} app bundles", apps.len());
-        for (elf_path, manifest_path) in apps {
+        let versioned_apps = apps
+            .into_iter()
+            .map(|(elf_path, manifest_path)| {
+                let manifest = read_app_manifest(&manifest_path)?;
+                let app_version = match manifest.version {
+                    Some(version) => version,
+                    None if relative_dir == "sideload-apps" => {
+                        anyhow::bail!("Sideload app manifest has no version: {}", manifest_path.display())
+                    }
+                    None => {
+                        println!(
+                            "{}",
+                            format!(
+                                "App manifest {} has no version; using KeyOS version {}",
+                                manifest_path.display(),
+                                firmware_version
+                            )
+                            .yellow()
+                        );
+                        firmware_version.to_string()
+                    }
+                };
+                semver::Version::parse(&app_version).with_context(|| {
+                    format!("Invalid app version {app_version:?} in {}", manifest_path.display())
+                })?;
+                anyhow::ensure!(
+                    app_version.len() <= 20,
+                    "App version is too long for a cosign2 header in {}: {:?}",
+                    manifest_path.display(),
+                    app_version
+                );
+                Ok((elf_path, manifest_path, app_version))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        for (elf_path, manifest_path, app_version) in versioned_apps {
             sign_file_if_needed(
                 &elf_path,
                 &format!("app binary {}", elf_path.display()),
                 config_path,
-                firmware_version,
+                &app_version,
                 is_developer,
             )?;
             sign_file_if_needed(
                 &manifest_path,
                 &format!("app manifest {}", manifest_path.display()),
                 config_path,
-                firmware_version,
+                &app_version,
                 is_developer,
             )?;
         }
@@ -1526,6 +1577,14 @@ fn check_signatures_quiet(file_path: &str) -> Result<SignatureStatus> {
     check_signatures_impl(file_path, false)
 }
 
+fn cosign2_dump_version(stdout: &str) -> Option<String> {
+    stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("version").map(str::trim))
+        .filter(|version| !version.is_empty())
+        .map(str::to_string)
+}
+
 fn check_signatures_impl(file_path: &str, verbose: bool) -> Result<SignatureStatus> {
     // Run cosign2 dump and capture output
     let output = Command::new("cosign2")
@@ -1548,8 +1607,11 @@ fn check_signatures_impl(file_path: &str, verbose: bool) -> Result<SignatureStat
             has_header: false,
             has_first_signature: false,
             has_second_signature: false,
+            version: None,
         });
     }
+
+    let version = cosign2_dump_version(&stdout);
 
     // Check for zero signatures in signature2
     let re_sig2 = Regex::new(r"signature2.*0{64}")?;
@@ -1561,6 +1623,7 @@ fn check_signatures_impl(file_path: &str, verbose: bool) -> Result<SignatureStat
             has_header: true,
             has_first_signature: true,
             has_second_signature: false,
+            version,
         });
     }
 
@@ -1578,6 +1641,7 @@ fn check_signatures_impl(file_path: &str, verbose: bool) -> Result<SignatureStat
             has_header: true,
             has_first_signature: false,
             has_second_signature: false,
+            version,
         });
     }
 
@@ -1589,6 +1653,7 @@ fn check_signatures_impl(file_path: &str, verbose: bool) -> Result<SignatureStat
         has_header: true,
         has_first_signature: true,
         has_second_signature: true,
+        version,
     })
 }
 
@@ -2213,6 +2278,7 @@ mod tests {
         let json = serde_json::json!({
             "appName": { "en": "Example" },
             "appId": "0x00112233445566778899aabbccddeeff",
+            "version": "1.2.3",
             "fileHashes": {
                 "resources/logo.bin": "00",
                 "icon.bin": "00",
@@ -2264,10 +2330,30 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         write_manifest(temp.path(), false);
         let unsigned = app_manifest_hashed_files(temp.path()).unwrap();
+        assert_eq!(
+            read_app_manifest(&temp.path().join(APP_MANIFEST_FILE))
+                .unwrap()
+                .version
+                .as_deref(),
+            Some("1.2.3")
+        );
         write_manifest(temp.path(), true);
         let signed = app_manifest_hashed_files(temp.path()).unwrap();
+        assert_eq!(
+            read_app_manifest(&temp.path().join(APP_MANIFEST_FILE))
+                .unwrap()
+                .version
+                .as_deref(),
+            Some("1.2.3")
+        );
 
         assert_eq!(unsigned, signed);
         assert_eq!(unsigned, ["app.elf", "icon.bin", "resources/logo.bin"]);
+    }
+
+    #[test]
+    fn reads_the_binary_version_from_cosign2_dump_output() {
+        let output = "magic      atsama5d27-keyos\nversion    1.22.1\nsize       123\n";
+        assert_eq!(cosign2_dump_version(output).as_deref(), Some("1.22.1"));
     }
 }
