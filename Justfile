@@ -158,7 +158,7 @@ create-release BASE_VERSION NEW_VERSION CONFIG_PATH *args:
 # Sign individual files with the provided key (uses a dedicated git worktree to avoid switching your current branch)
 sign VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
     #!/usr/bin/env bash
-    set -u
+    set -euo pipefail
 
     VER="{{VERSION}}"
     CFG="{{CONFIG_PATH}}"
@@ -222,6 +222,23 @@ sign VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"
     fi
 
     echo "✅ $MSG"
+
+# Pack already-signed sideload bundles into installable .app archives without signing other files
+pack-sideload-apps VERSION:
+    #!/usr/bin/env bash
+    set -eu
+
+    VER="{{VERSION}}"
+    ROOT="{{justfile_directory()}}"
+    WORKTREES_DIR="${KEYOS_RELEASES_WORKTREES_DIR:-"$ROOT/.worktrees"}"
+    WT="$WORKTREES_DIR/$VER"
+
+    if [ ! -d "$WT/$VER/sideload-apps" ]; then
+        echo "ERROR: Sideload app directory not found: $WT/$VER/sideload-apps" >&2
+        exit 1
+    fi
+
+    (cd "$WT" && cargo run --manifest-path "$ROOT/tools/signer/Cargo.toml" -- pack-sideload-apps "$VER")
 
 # Create recovery tar file (only when all files have two signatures)
 create-recovery-tar VERSION CONFIG_PATH=env_var_or_default("COSIGN_TOML_PATH", "~/cosign2.toml"):
