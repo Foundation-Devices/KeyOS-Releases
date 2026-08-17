@@ -16,6 +16,9 @@ mod release_manifest;
 mod test;
 
 const PATH_TO_STR_ERROR: &str = "Path should be a valid string";
+const ALPHA_WIRE_FLAG: u16 = 0x80;
+const MAX_BETA_SEQUENCE: u16 = ALPHA_WIRE_FLAG - 1;
+const MAX_ALPHA_SEQUENCE: u16 = u8::MAX as u16 - ALPHA_WIRE_FLAG - 1;
 
 /// `release-gen` traverses the two directories and crates a `release.tar` file
 /// that contains the manifest describing what actions to perform to reach the
@@ -62,25 +65,94 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn ota_patch_version(version: &str) -> anyhow::Result<String> {
-    let version = version.strip_prefix('v').unwrap_or(version);
+    let value = version.strip_prefix('v').unwrap_or(version);
+    anyhow::ensure!(
+        value.len() <= 20,
+        "KeyOS version is too long for a cosign2 header: '{value}'"
+    );
+    let version = semver::Version::parse(value)
+        .with_context(|| format!("invalid KeyOS version '{value}'"))?;
+    anyhow::ensure!(
+        version.major <= u8::MAX.into()
+            && version.minor <= u8::MAX.into()
+            && version.patch <= u8::MAX.into(),
+        "KeyOS version components must be between 0 and 255: '{value}'"
+    );
+    anyhow::ensure!(
+        version.build.is_empty(),
+        "KeyOS versions may not contain build metadata: '{value}'"
+    );
 
-    let Some((base, prerelease)) = version.split_once('-') else {
-        return Ok(version.to_string());
-    };
-
-    let beta = prerelease
-        .strip_prefix("beta.")
-        .or_else(|| prerelease.strip_prefix("beta"));
-
-    if let Some(beta) = beta {
-        if !beta.is_empty() && beta.chars().all(|c| c.is_ascii_digit()) {
-            return Ok(format!("{base}b{beta}"));
-        }
+    let base = format!("{}.{}.{}", version.major, version.minor, version.patch);
+    if version.pre.is_empty() {
+        return Ok(base);
     }
 
-    anyhow::bail!(
-        "unsupported prerelease version '{version}' for OTA patches; use x.y.z or x.y.z-betaN"
+    let mut identifiers = version.pre.as_str().split('.');
+    let channel = identifiers.next().unwrap_or_default();
+    let sequence = identifiers
+        .next()
+        .and_then(|value| value.parse::<u16>().ok())
+        .with_context(|| format!("KeyOS prereleases must use alpha.N or beta.N: '{value}'"))?;
+    anyhow::ensure!(
+        identifiers.next().is_none(),
+        "KeyOS prereleases must use alpha.N or beta.N: '{value}'"
     );
+    let wire_prerelease = match channel {
+        "alpha" => {
+            anyhow::ensure!(
+                (1..=MAX_ALPHA_SEQUENCE).contains(&sequence),
+                "KeyOS alpha sequence must be between 1 and {MAX_ALPHA_SEQUENCE}: '{value}'"
+            );
+            ALPHA_WIRE_FLAG | sequence
+        }
+        "beta" => {
+            anyhow::ensure!(
+                (1..=MAX_BETA_SEQUENCE).contains(&sequence),
+                "KeyOS beta sequence must be between 1 and {MAX_BETA_SEQUENCE}: '{value}'"
+            );
+            sequence
+        }
+        _ => anyhow::bail!("KeyOS prereleases must use alpha.N or beta.N: '{value}'"),
+    };
+    Ok(format!("{base}b{wire_prerelease}"))
+}
+
+fn base_ota_patch_version(version: &str) -> anyhow::Result<String> {
+    // 1.4.0-beta1 was published before canonical prerelease labels were enforced.
+    if version.strip_prefix('v').unwrap_or(version) == "1.4.0-beta1" {
+        return Ok("1.4.0b1".to_string());
+    }
+    ota_patch_version(version)
+}
+
+fn updater_supports_canonical_prereleases(version: &str) -> bool {
+    let version = version.strip_prefix('v').unwrap_or(version);
+    semver::Version::parse(version)
+        .map(|version| version >= semver::Version::new(1, 4, 0))
+        .unwrap_or(false)
+}
+
+fn manifest_patch_versions(
+    base_version: &str,
+    new_version: &str,
+    base_wire_version: &str,
+    new_wire_version: &str,
+) -> (String, String) {
+    if updater_supports_canonical_prereleases(base_version) {
+        (
+            base_version
+                .strip_prefix('v')
+                .unwrap_or(base_version)
+                .to_string(),
+            new_version
+                .strip_prefix('v')
+                .unwrap_or(new_version)
+                .to_string(),
+        )
+    } else {
+        (base_wire_version.to_string(), new_wire_version.to_string())
+    }
 }
 
 pub fn run(args: Args) -> anyhow::Result<()> {
@@ -98,8 +170,14 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
         }
     }
 
-    let base_patch_version = ota_patch_version(&args.base_version)?;
+    let base_patch_version = base_ota_patch_version(&args.base_version)?;
     let new_patch_version = ota_patch_version(&args.new_version)?;
+    let (base_manifest_version, new_manifest_version) = manifest_patch_versions(
+        &args.base_version,
+        &args.new_version,
+        &base_patch_version,
+        &new_patch_version,
+    );
 
     println!("[INFO] setting up output directory");
 
@@ -247,8 +325,8 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
                 actions.push(Action::Patch {
                     patch_file: patch_file_path,
                     patch_source: patch_source_path,
-                    base_version: format!("v{}", base_patch_version),
-                    new_version: format!("v{}", new_patch_version),
+                    base_version: format!("v{base_manifest_version}"),
+                    new_version: format!("v{new_manifest_version}"),
                 });
                 println!(
                     "[INFO] action/patch ({}): {}",

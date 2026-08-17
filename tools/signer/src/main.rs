@@ -2,12 +2,11 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use tempfile::TempDir;
@@ -173,21 +172,76 @@ struct VersionInfo {
 
 struct SignatureStatus {
     has_header: bool,
-    has_first_signature: bool,
-    has_second_signature: bool,
+    slot1_present: bool,
+    slot2_present: bool,
+    pubkey1: Option<String>,
+    pubkey2: Option<String>,
     version: Option<String>,
 }
 
 impl SignatureStatus {
     fn signature_count(&self) -> u8 {
-        if self.has_second_signature {
-            2
-        } else if self.has_first_signature {
-            1
-        } else {
-            0
-        }
+        u8::from(self.slot1_present) + u8::from(self.slot2_present)
     }
+
+    fn has_any_signature(&self) -> bool {
+        self.slot1_present || self.slot2_present
+    }
+
+    fn is_developer_signed(&self) -> bool {
+        !self.slot1_present && self.slot2_present
+    }
+
+    fn trusted_signature_count(&self) -> Result<u8> {
+        if !self.has_header {
+            return Ok(0);
+        }
+        if self.is_developer_signed() {
+            anyhow::bail!("developer signature found where production signatures are required");
+        }
+        anyhow::ensure!(
+            self.slot1_present,
+            "cosign2 header has no first production signature"
+        );
+        let pubkey1 = self
+            .pubkey1
+            .as_deref()
+            .context("cosign2 dump omitted pubkey1")?;
+        anyhow::ensure!(
+            is_production_signer(pubkey1),
+            "first signature uses an unauthorized public key"
+        );
+        if !self.slot2_present {
+            return Ok(1);
+        }
+        let pubkey2 = self
+            .pubkey2
+            .as_deref()
+            .context("cosign2 dump omitted pubkey2")?;
+        anyhow::ensure!(
+            is_production_signer(pubkey2),
+            "second signature uses an unauthorized public key"
+        );
+        anyhow::ensure!(
+            !pubkey1.eq_ignore_ascii_case(pubkey2),
+            "both signatures use the same public key"
+        );
+        Ok(2)
+    }
+}
+
+// Keep synchronized with KeyOS-dev/utils/fw-utils/src/hash.rs::KNOWN_SIGNERS.
+const PRODUCTION_SIGNERS: [&str; 4] = [
+    "03bf014e1a37a113089bea7b50ee9bd7733189ecd6afb7e051a6e95f99b97da5e9",
+    "03040e47c1cde8978085bdc8b44df85e7c0b2e1ea586697b5d385e523d3f908bc3",
+    "038de8dd1cbad8bf1da7ff64b8a9b4a375f0205eff41f7f9dca8e91c4cf0951daa",
+    "03cb8e4219d3c8f269ab2ed3acb71a4b1722c76a0c348ea11fa79b4639bef45094",
+];
+
+fn is_production_signer(pubkey: &str) -> bool {
+    PRODUCTION_SIGNERS
+        .iter()
+        .any(|trusted| trusted.eq_ignore_ascii_case(pubkey))
 }
 
 fn main() -> Result<()> {
@@ -203,6 +257,7 @@ fn main() -> Result<()> {
         } => {
             let version_folder = version.clone();
             let firmware_version = strip_v_prefix(version);
+            validate_keyos_version(&firmware_version)?;
             sign_files(&version_folder, config_path, &firmware_version, *developer)?;
         }
         Commands::PackSideloadApps { version, developer } => {
@@ -216,6 +271,7 @@ fn main() -> Result<()> {
         } => {
             let version_folder = version.clone();
             let firmware_version = strip_v_prefix(version);
+            validate_keyos_version(&firmware_version)?;
             create_tar(
                 &version_folder,
                 config_path,
@@ -239,11 +295,13 @@ fn main() -> Result<()> {
         } => {
             let version_folder = version.clone();
             let firmware_version = strip_v_prefix(version);
+            validate_keyos_version(&firmware_version)?;
             validate(&version_folder, &firmware_version, *files_only, *dev)?;
         }
         Commands::Package { version, output } => {
             let version_folder = version.clone();
-            let firmware_version = strip_v_prefix(&version);
+            let firmware_version = strip_v_prefix(version);
+            validate_keyos_version(&firmware_version)?;
             let output_path = output
                 .clone()
                 .unwrap_or_else(|| format!("KeyOS-v{}.zip", firmware_version));
@@ -280,60 +338,156 @@ fn main() -> Result<()> {
 
 fn strip_v_prefix(version: &str) -> String {
     // Remove 'v' prefix if present for cosign2 --binary-version parameter
-    if version.starts_with('v') {
-        version[1..].to_string()
-    } else {
-        version.to_string()
+    version.strip_prefix('v').unwrap_or(version).to_string()
+}
+
+const KEYOS_ALPHA_WIRE_FLAG: u16 = 0x80;
+const MAX_KEYOS_BETA_SEQUENCE: u16 = KEYOS_ALPHA_WIRE_FLAG - 1;
+const MAX_KEYOS_ALPHA_SEQUENCE: u16 = u8::MAX as u16 - KEYOS_ALPHA_WIRE_FLAG - 1;
+
+fn validate_keyos_version(value: &str) -> Result<()> {
+    anyhow::ensure!(
+        value.len() <= 20,
+        "KeyOS version is too long for a cosign2 header: {value:?}"
+    );
+    let version = semver::Version::parse(value)
+        .with_context(|| format!("Invalid KeyOS version {value:?}"))?;
+    anyhow::ensure!(
+        version.major <= u8::MAX.into()
+            && version.minor <= u8::MAX.into()
+            && version.patch <= u8::MAX.into(),
+        "KeyOS version components must be between 0 and 255: {value:?}"
+    );
+    anyhow::ensure!(
+        version.build.is_empty(),
+        "KeyOS versions may not contain build metadata: {value:?}"
+    );
+    if version.pre.is_empty() {
+        return Ok(());
     }
+
+    let mut identifiers = version.pre.as_str().split('.');
+    let channel = identifiers.next().unwrap_or_default();
+    let sequence = identifiers
+        .next()
+        .and_then(|value| value.parse::<u16>().ok())
+        .with_context(|| format!("KeyOS prereleases must use alpha.N or beta.N: {value:?}"))?;
+    anyhow::ensure!(
+        identifiers.next().is_none(),
+        "KeyOS prereleases must use alpha.N or beta.N: {value:?}"
+    );
+    match channel {
+        "alpha" => anyhow::ensure!(
+            (1..=MAX_KEYOS_ALPHA_SEQUENCE).contains(&sequence),
+            "KeyOS alpha sequence must be between 1 and {MAX_KEYOS_ALPHA_SEQUENCE}: {value:?}"
+        ),
+        "beta" => anyhow::ensure!(
+            (1..=MAX_KEYOS_BETA_SEQUENCE).contains(&sequence),
+            "KeyOS beta sequence must be between 1 and {MAX_KEYOS_BETA_SEQUENCE}: {value:?}"
+        ),
+        _ => anyhow::bail!("KeyOS prereleases must use alpha.N or beta.N: {value:?}"),
+    }
+    Ok(())
 }
 
 const APP_BUNDLE_DIRS: [&str; 2] = ["keyos/apps", "sideload-apps"];
 const APP_MANIFEST_FILE: &str = "manifest.json";
 const APP_ARCHIVE_EXTENSION: &str = "app";
 const MAX_APP_BUNDLE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_SIGNING_ZIP_ENTRIES: usize = 10_000;
+const MAX_SIGNING_ZIP_FILE_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_SIGNING_ZIP_TOTAL_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 #[derive(Deserialize)]
 struct AppArchiveManifest {
+    #[serde(rename = "appId")]
+    app_id: String,
     version: Option<String>,
     #[serde(rename = "fileHashes")]
     file_hashes: BTreeMap<String, String>,
 }
+
+const LEGACY_VERSIONLESS_BUILTINS: [(&str, &str); 9] = [
+    ("gui-app-alerts", "0x32defc0867555fe8002759667000b22a"),
+    (
+        "gui-app-authenticator",
+        "0x41757468656e74696361746f72203246",
+    ),
+    ("gui-app-bitcoin", "0x426974636f696e2057616c6c65740000"),
+    ("gui-app-file-browser", "0x46696c652042726f7773657200000000"),
+    ("gui-app-onboarding", "0xdac5321775d449c11bc9c90f38067f8f"),
+    ("gui-app-qr-scanner", "0x6775692d6170702d6578616d706c652e"),
+    (
+        "gui-app-security-keys",
+        "0x5365637572697479204b657973000000",
+    ),
+    ("gui-app-seed-vault", "0x53656564205661756c74000000000000"),
+    ("gui-app-settings", "0xc192b79230473875f159d4423d74d00f"),
+];
 
 fn collect_app_bundles(apps_dir: &Path) -> Result<Vec<(std::path::PathBuf, std::path::PathBuf)>> {
     let mut apps = Vec::new();
     for entry in fs::read_dir(apps_dir).context("Failed to read apps directory")? {
         let entry = entry.context("Failed to read directory entry")?;
         let path = entry.path();
-        if !path.is_dir() {
+        let metadata = fs::symlink_metadata(&path)
+            .with_context(|| format!("Failed to inspect app bundle entry {}", path.display()))?;
+        anyhow::ensure!(
+            !metadata.file_type().is_symlink(),
+            "App bundle entry may not be a symlink: {}",
+            path.display()
+        );
+        if !metadata.is_dir() {
             continue;
         }
 
         let elf_path = path.join("app.elf");
         let manifest_path = path.join("manifest.json");
-        if elf_path.exists() && manifest_path.exists() {
-            apps.push((elf_path, manifest_path));
-        }
+        anyhow::ensure!(
+            elf_path.exists(),
+            "App bundle is missing {}",
+            elf_path.display()
+        );
+        anyhow::ensure!(
+            manifest_path.exists(),
+            "App bundle is missing {}",
+            manifest_path.display()
+        );
+        ensure_regular_bundle_file(&path, &elf_path)?;
+        ensure_regular_bundle_file(&path, &manifest_path)?;
+        apps.push((elf_path, manifest_path));
     }
     apps.sort_by(|left, right| left.0.cmp(&right.0));
     Ok(apps)
 }
 
 fn read_app_manifest(manifest_path: &Path) -> Result<AppArchiveManifest> {
-    let bytes = fs::read(&manifest_path)
+    let bundle_dir = manifest_path
+        .parent()
+        .context("App manifest has no bundle directory")?;
+    ensure_regular_bundle_file(bundle_dir, manifest_path)?;
+    let bytes = fs::read(manifest_path)
         .with_context(|| format!("Failed to read app manifest {}", manifest_path.display()))?;
 
-    // Release preparation emits plain JSON. Each signer subsequently adds or updates the fixed
-    // cosign2 header, so accept either representation for signing-zip transport and final packing.
-    serde_json::from_slice(&bytes)
-        .or_else(|_| {
-            let json = bytes.get(COSIGN2_HEADER_SIZE..).ok_or_else(|| {
-                serde_json::Error::io(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "manifest is too short to contain a cosign2 header",
-                ))
-            })?;
-            serde_json::from_slice(json)
-        })
+    if let Ok(manifest) = serde_json::from_slice(&bytes) {
+        return Ok(manifest);
+    }
+
+    let path = manifest_path.to_str().with_context(|| {
+        format!(
+            "App manifest path is not valid UTF-8: {}",
+            manifest_path.display()
+        )
+    })?;
+    let status = check_signatures_quiet(path)?;
+    anyhow::ensure!(
+        status.has_header,
+        "App manifest is neither plain JSON nor cosign2-signed JSON"
+    );
+    let json = bytes
+        .get(COSIGN2_HEADER_SIZE..)
+        .context("App manifest is too short to contain a cosign2 header")?;
+    serde_json::from_slice(json)
         .with_context(|| format!("Failed to parse app manifest {}", manifest_path.display()))
 }
 
@@ -341,28 +495,320 @@ fn app_manifest_hashed_files(bundle_dir: &Path) -> Result<Vec<String>> {
     let manifest_path = bundle_dir.join(APP_MANIFEST_FILE);
     let manifest = read_app_manifest(&manifest_path)?;
 
-    let mut names: Vec<String> = manifest.file_hashes.into_keys().collect();
-    names.sort_unstable();
-    for name in &names {
-        let path = Path::new(name);
+    anyhow::ensure!(
+        manifest.file_hashes.contains_key("app.elf"),
+        "App manifest {} does not hash app.elf",
+        manifest_path.display()
+    );
+    let mut files: Vec<(String, String)> = manifest.file_hashes.into_iter().collect();
+    files.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    let mut names = Vec::with_capacity(files.len());
+    for (name, expected_hash) in files {
+        validate_bundle_relative_path(&manifest_path, &name)?;
+        let path = bundle_dir.join(&name);
+        ensure_regular_bundle_file(bundle_dir, &path)?;
+        let expected_hash = parse_sha256(&expected_hash).with_context(|| {
+            format!(
+                "Invalid fileHashes value for {name} in {}",
+                manifest_path.display()
+            )
+        })?;
+        let actual_hash = calculate_app_bundle_file_hash(&path, name == "app.elf")?;
         anyhow::ensure!(
-            !name.is_empty()
-                && name != APP_MANIFEST_FILE
-                && !path.is_absolute()
-                && path.components().all(|component| matches!(component, Component::Normal(_))),
-            "Invalid fileHashes path in {}: {}",
-            manifest_path.display(),
-            name
+            actual_hash == expected_hash,
+            "App manifest hash mismatch for {}",
+            path.display()
         );
+        names.push(name);
     }
     Ok(names)
 }
 
+fn validate_bundle_relative_path(manifest_path: &Path, name: &str) -> Result<()> {
+    let path = Path::new(name);
+    let valid = !name.is_empty()
+        && name != APP_MANIFEST_FILE
+        && !name.starts_with('/')
+        && !name.contains('\\')
+        && name
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+        && !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)));
+    anyhow::ensure!(
+        valid,
+        "Invalid fileHashes path in {}: {}",
+        manifest_path.display(),
+        name
+    );
+    Ok(())
+}
+
+fn ensure_regular_bundle_file(bundle_dir: &Path, path: &Path) -> Result<()> {
+    let root_metadata = fs::symlink_metadata(bundle_dir)
+        .with_context(|| format!("Failed to inspect app bundle {}", bundle_dir.display()))?;
+    anyhow::ensure!(
+        root_metadata.is_dir() && !root_metadata.file_type().is_symlink(),
+        "App bundle directory may not be a symlink: {}",
+        bundle_dir.display()
+    );
+    let relative = path.strip_prefix(bundle_dir).with_context(|| {
+        format!(
+            "App bundle file {} is outside {}",
+            path.display(),
+            bundle_dir.display()
+        )
+    })?;
+    let mut current = bundle_dir.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(component) = component else {
+            anyhow::bail!("Invalid app bundle path: {}", path.display());
+        };
+        current.push(component);
+        let metadata = fs::symlink_metadata(&current)
+            .with_context(|| format!("Failed to inspect app bundle file {}", current.display()))?;
+        anyhow::ensure!(
+            !metadata.file_type().is_symlink(),
+            "App bundle file may not be a symlink: {}",
+            current.display()
+        );
+    }
+    anyhow::ensure!(
+        path.is_file(),
+        "App bundle file is missing: {}",
+        path.display()
+    );
+    Ok(())
+}
+
+fn parse_sha256(value: &str) -> Result<[u8; 32]> {
+    anyhow::ensure!(
+        value.len() == 64,
+        "SHA-256 value must contain 64 hexadecimal characters"
+    );
+    let bytes = hex::decode(value).context("SHA-256 value is not hexadecimal")?;
+    bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("SHA-256 value must contain 32 bytes"))
+}
+
+fn calculate_app_bundle_file_hash(path: &Path, signed_payload: bool) -> Result<[u8; 32]> {
+    let bytes = fs::read(path)
+        .with_context(|| format!("Failed to read app bundle file {}", path.display()))?;
+    let payload = if signed_payload {
+        if bytes.starts_with(b"\x7fELF") {
+            bytes.as_slice()
+        } else {
+            let path_str = path.to_str().with_context(|| {
+                format!("App bundle path is not valid UTF-8: {}", path.display())
+            })?;
+            let status = check_signatures_quiet(path_str)?;
+            anyhow::ensure!(
+                status.has_header,
+                "App binary is neither an ELF file nor cosign2-signed: {}",
+                path.display()
+            );
+            bytes
+                .get(COSIGN2_HEADER_SIZE..)
+                .with_context(|| format!("Signed app binary is too short: {}", path.display()))?
+        }
+    } else {
+        bytes.as_slice()
+    };
+    Ok(Sha256::digest(payload).into())
+}
+
+fn legacy_builtin_version_allowed(bundle_dir: &Path, app_id: &str) -> bool {
+    let Some(name) = bundle_dir.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    LEGACY_VERSIONLESS_BUILTINS.contains(&(name, app_id))
+}
+
+fn app_signing_version(
+    bundle_dir: &Path,
+    manifest_path: &Path,
+    relative_dir: &str,
+    firmware_version: &str,
+) -> Result<String> {
+    let manifest = read_app_manifest(manifest_path)?;
+    let app_version = match manifest.version.as_deref() {
+        Some(version) => version.to_string(),
+        None if relative_dir == "sideload-apps" => {
+            anyhow::bail!(
+                "Sideload app manifest has no version: {}",
+                manifest_path.display()
+            )
+        }
+        None if legacy_builtin_version_allowed(bundle_dir, &manifest.app_id) => {
+            println!(
+                "{}",
+                format!(
+                    "App manifest {} has no version; using KeyOS version {}",
+                    manifest_path.display(),
+                    firmware_version
+                )
+                .yellow()
+            );
+            firmware_version.to_string()
+        }
+        None => {
+            anyhow::bail!(
+                "Built-in app manifest has no version and is not allowlisted: {}",
+                manifest_path.display()
+            )
+        }
+    };
+    semver::Version::parse(&app_version).with_context(|| {
+        format!(
+            "Invalid app version {app_version:?} in {}",
+            manifest_path.display()
+        )
+    })?;
+    anyhow::ensure!(
+        app_version.len() <= 20,
+        "App version is too long for a cosign2 header in {}: {:?}",
+        manifest_path.display(),
+        app_version
+    );
+    Ok(app_version)
+}
+
+fn validated_zip_entries<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Result<Vec<PathBuf>> {
+    anyhow::ensure!(
+        archive.len() <= MAX_SIGNING_ZIP_ENTRIES,
+        "Zip contains too many entries: {} (maximum {})",
+        archive.len(),
+        MAX_SIGNING_ZIP_ENTRIES
+    );
+
+    let mut entries = Vec::with_capacity(archive.len());
+    let mut seen = HashSet::new();
+    let mut total_bytes = 0u64;
+    for index in 0..archive.len() {
+        let file = archive.by_index(index)?;
+        let name = file.name();
+        let path = Path::new(name);
+        let valid = !name.is_empty()
+            && !name.starts_with('/')
+            && !name.contains('\\')
+            && path
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)));
+        anyhow::ensure!(valid, "Unsafe zip entry path: {name:?}");
+        anyhow::ensure!(
+            file.unix_mode()
+                .is_none_or(|mode| mode & 0o170000 != 0o120000),
+            "Zip entry may not be a symlink: {name}"
+        );
+        anyhow::ensure!(
+            seen.insert(path.to_path_buf()),
+            "Duplicate zip entry: {name}"
+        );
+        anyhow::ensure!(
+            file.size() <= MAX_SIGNING_ZIP_FILE_BYTES,
+            "Zip entry {name} is too large: {} bytes",
+            file.size()
+        );
+        total_bytes = total_bytes
+            .checked_add(file.size())
+            .context("Zip uncompressed size overflow")?;
+        anyhow::ensure!(
+            total_bytes <= MAX_SIGNING_ZIP_TOTAL_BYTES,
+            "Zip expands to more than {} bytes",
+            MAX_SIGNING_ZIP_TOTAL_BYTES
+        );
+        entries.push(path.to_path_buf());
+    }
+    Ok(entries)
+}
+
+fn ensure_archive_destination(root: &Path, relative: &Path) -> Result<()> {
+    let root_metadata = fs::symlink_metadata(root)
+        .with_context(|| format!("Failed to inspect extraction root {}", root.display()))?;
+    anyhow::ensure!(
+        root_metadata.is_dir() && !root_metadata.file_type().is_symlink(),
+        "Extraction root may not be a symlink: {}",
+        root.display()
+    );
+
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(component) = component else {
+            anyhow::bail!("Invalid archive path: {}", relative.display());
+        };
+        current.push(component);
+        if let Ok(metadata) = fs::symlink_metadata(&current) {
+            anyhow::ensure!(
+                !metadata.file_type().is_symlink(),
+                "Archive destination may not traverse a symlink: {}",
+                current.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn extract_zip_archive<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    entries: &[PathBuf],
+    root: &Path,
+    verbose: bool,
+) -> Result<usize> {
+    fs::create_dir_all(root)?;
+    ensure_archive_destination(root, Path::new(""))?;
+
+    let mut file_count = 0;
+    for (index, relative) in entries.iter().enumerate() {
+        let mut file = archive.by_index(index)?;
+        ensure_archive_destination(root, relative)?;
+        let outpath = root.join(relative);
+        if file.is_dir() {
+            fs::create_dir_all(&outpath)?;
+            continue;
+        }
+
+        if verbose {
+            print!("  {} {}...", "→".blue(), relative.display());
+        }
+        if let Some(parent) = outpath.parent() {
+            fs::create_dir_all(parent)?;
+            ensure_archive_destination(root, relative)?;
+        }
+        let expected_size = file.size();
+        let mut outfile = File::create(&outpath)?;
+        let copied = io::copy(
+            &mut file.by_ref().take(expected_size.saturating_add(1)),
+            &mut outfile,
+        )?;
+        anyhow::ensure!(
+            copied == expected_size,
+            "Zip entry {} expanded to an unexpected size",
+            relative.display()
+        );
+        if verbose {
+            println!(" {}", "✓".green());
+        }
+        file_count += 1;
+    }
+    Ok(file_count)
+}
+
 fn app_bundle_files(bundle_dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files = vec![bundle_dir.join(APP_MANIFEST_FILE)];
-    files.extend(app_manifest_hashed_files(bundle_dir)?.into_iter().map(|name| bundle_dir.join(name)));
+    files.extend(
+        app_manifest_hashed_files(bundle_dir)?
+            .into_iter()
+            .map(|name| bundle_dir.join(name)),
+    );
     for path in &files {
-        anyhow::ensure!(path.is_file(), "App bundle file is missing: {}", path.display());
+        anyhow::ensure!(
+            path.is_file(),
+            "App bundle file is missing: {}",
+            path.display()
+        );
     }
     Ok(files)
 }
@@ -379,10 +825,21 @@ fn pack_app_bundle(bundle_dir: &Path, archive_path: &Path) -> Result<()> {
     let mut stream_bytes = 1024u64;
     for path in &files {
         let size = fs::metadata(path)
-            .with_context(|| format!("Failed to read app bundle file metadata: {}", path.display()))?
+            .with_context(|| {
+                format!(
+                    "Failed to read app bundle file metadata: {}",
+                    path.display()
+                )
+            })?
             .len();
-        let relative = path.strip_prefix(bundle_dir).expect("bundle file is below its root");
-        let framing = if relative.as_os_str().len() > 100 { 2048 } else { 1024 };
+        let relative = path
+            .strip_prefix(bundle_dir)
+            .expect("bundle file is below its root");
+        let framing = if relative.as_os_str().len() > 100 {
+            2048
+        } else {
+            1024
+        };
         stream_bytes = stream_bytes.saturating_add(size).saturating_add(framing);
     }
     anyhow::ensure!(
@@ -398,7 +855,9 @@ fn pack_app_bundle(bundle_dir: &Path, archive_path: &Path) -> Result<()> {
     let encoder = GzEncoder::new(archive, Compression::default());
     let mut builder = tar::Builder::new(encoder);
     for path in files {
-        let relative = path.strip_prefix(bundle_dir).expect("bundle file is below its root");
+        let relative = path
+            .strip_prefix(bundle_dir)
+            .expect("bundle file is below its root");
         let data = fs::read(&path)
             .with_context(|| format!("Failed to read app bundle file {}", path.display()))?;
         let mut header = tar::Header::new_gnu();
@@ -431,12 +890,20 @@ fn validate_app_archive(bundle_dir: &Path, archive_path: &Path) -> Result<()> {
         .with_context(|| format!("Failed to read app archive {}", archive_path.display()))?;
 
     for expected_path in expected_files {
-        let expected_name = expected_path.strip_prefix(bundle_dir).expect("bundle file is below its root");
+        let expected_name = expected_path
+            .strip_prefix(bundle_dir)
+            .expect("bundle file is below its root");
         let mut entry = entries
             .next()
             .transpose()
             .with_context(|| format!("Failed to read app archive {}", archive_path.display()))?
-            .with_context(|| format!("App archive {} is missing {}", archive_path.display(), expected_name.display()))?;
+            .with_context(|| {
+                format!(
+                    "App archive {} is missing {}",
+                    archive_path.display(),
+                    expected_name.display()
+                )
+            })?;
         anyhow::ensure!(
             entry.path()?.as_ref() == expected_name,
             "App archive {} has an unexpected entry; expected {}",
@@ -449,8 +916,24 @@ fn validate_app_archive(bundle_dir: &Path, archive_path: &Path) -> Result<()> {
             archive_path.display(),
             expected_name.display()
         );
+        let expected_size = fs::metadata(&expected_path)?.len();
+        anyhow::ensure!(
+            entry.header().size()? == expected_size,
+            "App archive {} has an invalid size for {}",
+            archive_path.display(),
+            expected_name.display()
+        );
         let mut archived_data = Vec::new();
-        entry.read_to_end(&mut archived_data)?;
+        entry
+            .by_ref()
+            .take(expected_size.saturating_add(1))
+            .read_to_end(&mut archived_data)?;
+        anyhow::ensure!(
+            archived_data.len() as u64 == expected_size,
+            "App archive {} contains an invalid amount of data for {}",
+            archive_path.display(),
+            expected_name.display()
+        );
         anyhow::ensure!(
             archived_data == fs::read(&expected_path)?,
             "App archive {} contains stale data for {}",
@@ -458,11 +941,19 @@ fn validate_app_archive(bundle_dir: &Path, archive_path: &Path) -> Result<()> {
             expected_name.display()
         );
     }
-    anyhow::ensure!(entries.next().is_none(), "App archive {} has unexpected extra entries", archive_path.display());
+    anyhow::ensure!(
+        entries.next().is_none(),
+        "App archive {} has unexpected extra entries",
+        archive_path.display()
+    );
     Ok(())
 }
 
-fn pack_sideload_apps(version_folder: &str, developer: bool, defer_if_not_ready: bool) -> Result<()> {
+fn pack_sideload_apps(
+    version_folder: &str,
+    developer: bool,
+    defer_if_not_ready: bool,
+) -> Result<()> {
     let apps_dir = Path::new(version_folder).join("sideload-apps");
     if !apps_dir.is_dir() {
         if defer_if_not_ready {
@@ -484,9 +975,33 @@ fn pack_sideload_apps(version_folder: &str, developer: bool, defer_if_not_ready:
     }
     let mut ready = true;
     for (elf_path, manifest_path) in &bundles {
+        let manifest = read_app_manifest(manifest_path)?;
+        let app_version = manifest.version.as_deref().with_context(|| {
+            format!(
+                "Sideload app manifest has no version: {}",
+                manifest_path.display()
+            )
+        })?;
+        semver::Version::parse(app_version).with_context(|| {
+            format!(
+                "Invalid app version {app_version:?} in {}",
+                manifest_path.display()
+            )
+        })?;
         for path in [elf_path, manifest_path] {
             let status = check_signatures_quiet(&path.to_string_lossy())?;
-            ready &= if developer { status.has_first_signature } else { status.has_second_signature };
+            anyhow::ensure!(
+                status.version.as_deref() == Some(app_version),
+                "{} has cosign2 version {:?}, expected app version {:?}",
+                path.display(),
+                status.version.as_deref().unwrap_or("<missing>"),
+                app_version
+            );
+            ready &= if developer {
+                status.is_developer_signed()
+            } else {
+                status.trusted_signature_count()? == 2
+            };
         }
     }
     if !ready {
@@ -497,7 +1012,10 @@ fn pack_sideload_apps(version_folder: &str, developer: bool, defer_if_not_ready:
         return Err(SignerError::InsufficientSignatures.into());
     }
 
-    println!("\n{}", "Packing installable sideload app archives...".bold());
+    println!(
+        "\n{}",
+        "Packing installable sideload app archives...".bold()
+    );
     let expected_archives: HashSet<String> = bundles
         .iter()
         .filter_map(|(elf_path, _)| elf_path.parent()?.file_name()?.to_str())
@@ -505,21 +1023,30 @@ fn pack_sideload_apps(version_folder: &str, developer: bool, defer_if_not_ready:
         .collect();
     for entry in fs::read_dir(&apps_dir)? {
         let path = entry?.path();
-        if path.extension().is_some_and(|extension| extension == APP_ARCHIVE_EXTENSION)
+        if path
+            .extension()
+            .is_some_and(|extension| extension == APP_ARCHIVE_EXTENSION)
             && path
                 .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| !expected_archives.contains(name))
         {
-            fs::remove_file(&path)
-                .with_context(|| format!("Failed to remove stale app archive {}", path.display()))?;
+            fs::remove_file(&path).with_context(|| {
+                format!("Failed to remove stale app archive {}", path.display())
+            })?;
         }
     }
     for (elf_path, _) in bundles {
         let bundle_dir = elf_path.parent().expect("app.elf is inside its bundle");
-        let app_name = bundle_dir.file_name().and_then(|name| name.to_str()).with_context(|| {
-            format!("App bundle directory name is not valid UTF-8: {}", bundle_dir.display())
-        })?;
+        let app_name = bundle_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .with_context(|| {
+                format!(
+                    "App bundle directory name is not valid UTF-8: {}",
+                    bundle_dir.display()
+                )
+            })?;
         let archive_path = apps_dir.join(format!("{app_name}.{APP_ARCHIVE_EXTENSION}"));
         pack_app_bundle(bundle_dir, &archive_path)?;
         println!("  {} {}", "✓".green(), archive_path.display());
@@ -549,11 +1076,28 @@ fn sign_file_if_needed(
         );
     }
 
-    // Production signing is resumable so a partially signed release can be completed without
-    // attempting to add a third signature to files that are already complete.
-    if !is_developer && status.has_second_signature {
-        println!("Skipping {} (already has two signatures)", description);
-        return Ok(());
+    if is_developer {
+        if status.is_developer_signed() {
+            println!(
+                "Skipping {} (already has a developer signature)",
+                description
+            );
+            return Ok(());
+        }
+        anyhow::ensure!(
+            !status.has_header,
+            "{} already has a non-developer cosign2 header; rebuild it from the unsigned artifact",
+            file_path.display()
+        );
+    } else if status.has_header {
+        let trusted_count = status.trusted_signature_count()?;
+        if trusted_count == 2 {
+            println!(
+                "Skipping {} (already has two trusted signatures)",
+                description
+            );
+            return Ok(());
+        }
     }
 
     print!("Signing {}...", description);
@@ -582,6 +1126,27 @@ fn sign_file_if_needed(
             String::from_utf8_lossy(&output.stderr).to_string(),
         )
         .into());
+    }
+
+    let signed_status = check_signatures_quiet(file_path_str)?;
+    anyhow::ensure!(
+        signed_status.version.as_deref() == Some(binary_version),
+        "cosign2 wrote an unexpected version to {}",
+        file_path.display()
+    );
+    if is_developer {
+        anyhow::ensure!(
+            signed_status.is_developer_signed(),
+            "cosign2 did not create the expected developer signature for {}",
+            file_path.display()
+        );
+    } else {
+        let expected_count = if status.has_header { 2 } else { 1 };
+        anyhow::ensure!(
+            signed_status.trusted_signature_count()? == expected_count,
+            "cosign2 did not create the expected trusted production signature for {}",
+            file_path.display()
+        );
     }
 
     println!("{}", "✓ Success".green());
@@ -639,7 +1204,10 @@ fn sign_files(
             format!("Looking for app bundles in {}...", apps_path.display()).bold()
         );
         if !apps_path.is_dir() {
-            println!("{}", format!("No apps directory found at {}", apps_path.display()).yellow());
+            println!(
+                "{}",
+                format!("No apps directory found at {}", apps_path.display()).yellow()
+            );
             continue;
         }
 
@@ -648,34 +1216,14 @@ fn sign_files(
         let versioned_apps = apps
             .into_iter()
             .map(|(elf_path, manifest_path)| {
-                let manifest = read_app_manifest(&manifest_path)?;
-                let app_version = match manifest.version {
-                    Some(version) => version,
-                    None if relative_dir == "sideload-apps" => {
-                        anyhow::bail!("Sideload app manifest has no version: {}", manifest_path.display())
-                    }
-                    None => {
-                        println!(
-                            "{}",
-                            format!(
-                                "App manifest {} has no version; using KeyOS version {}",
-                                manifest_path.display(),
-                                firmware_version
-                            )
-                            .yellow()
-                        );
-                        firmware_version.to_string()
-                    }
-                };
-                semver::Version::parse(&app_version).with_context(|| {
-                    format!("Invalid app version {app_version:?} in {}", manifest_path.display())
-                })?;
-                anyhow::ensure!(
-                    app_version.len() <= 20,
-                    "App version is too long for a cosign2 header in {}: {:?}",
-                    manifest_path.display(),
-                    app_version
-                );
+                let bundle_dir = elf_path.parent().expect("app.elf is inside its bundle");
+                app_manifest_hashed_files(bundle_dir)?;
+                let app_version = app_signing_version(
+                    bundle_dir,
+                    &manifest_path,
+                    relative_dir,
+                    firmware_version,
+                )?;
                 Ok((elf_path, manifest_path, app_version))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -806,17 +1354,54 @@ fn create_tar(
     // Check recovery.bin (required for both recovery tar types)
     let recovery_bin = format!("{}/recovery.bin", version_folder);
     let recovery_status = check_signatures(&recovery_bin)?;
-    if !recovery_status.has_second_signature && !allow_one_signature {
+    anyhow::ensure!(
+        recovery_status.version.as_deref() == Some(firmware_version),
+        "recovery.bin has cosign2 version {:?}, expected {:?}",
+        recovery_status.version.as_deref().unwrap_or("<missing>"),
+        firmware_version
+    );
+    let required_signatures = if allow_one_signature { 1 } else { 2 };
+    if recovery_status.trusted_signature_count()? < required_signatures {
         all_signed = false;
         unsigned_files.push("recovery.bin".to_string());
     }
 
     // For core system recovery, we only need bootloader + recovery.bin
     // For regular recovery tar, we also need app.bin and apps
-    if !is_core_system_recovery {
+    if is_core_system_recovery {
+        let signed_bootloader = ["boot-signed.cip", "boot-signed.bin"]
+            .into_iter()
+            .map(|name| Path::new(version_folder).join(name))
+            .find(|path| path.is_file())
+            .context("Neither boot-signed.cip nor boot-signed.bin was found")?;
+        let boot_status = check_signatures(&signed_bootloader.to_string_lossy())?;
+        anyhow::ensure!(
+            boot_status.version.as_deref() == Some(firmware_version),
+            "{} has cosign2 version {:?}, expected {:?}",
+            signed_bootloader.display(),
+            boot_status.version.as_deref().unwrap_or("<missing>"),
+            firmware_version
+        );
+        if boot_status.trusted_signature_count()? < required_signatures {
+            all_signed = false;
+            unsigned_files.push(
+                signed_bootloader
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+            );
+        }
+    } else {
         let app_bin = format!("{}/keyos/app.bin", version_folder);
         let app_status = check_signatures(&app_bin)?;
-        if !app_status.has_second_signature && !allow_one_signature {
+        anyhow::ensure!(
+            app_status.version.as_deref() == Some(firmware_version),
+            "keyos/app.bin has cosign2 version {:?}, expected {:?}",
+            app_status.version.as_deref().unwrap_or("<missing>"),
+            firmware_version
+        );
+        if app_status.trusted_signature_count()? < required_signatures {
             all_signed = false;
             unsigned_files.push("keyos/app.bin".to_string());
         }
@@ -826,20 +1411,28 @@ fn create_tar(
         let apps_path = Path::new(&apps_dir);
 
         if apps_path.is_dir() {
-            for entry in fs::read_dir(apps_path).context("Failed to read apps directory")? {
-                let entry = entry.context("Failed to read directory entry")?;
-                let path = entry.path();
-
-                // Found an app dir, it should contain a signed app.elf and manifest.json.
-                if path.is_dir() {
-                    for file_name in ["app.elf", "manifest.json"] {
-                        let app_file = path.join(file_name);
-                        let app_file_str = app_file.to_string_lossy().to_string();
-                        let app_status = check_signatures(&app_file_str)?;
-                        if !app_status.has_second_signature && !allow_one_signature {
-                            all_signed = false;
-                            unsigned_files.push(app_file_str);
-                        }
+            for (elf_path, manifest_path) in collect_app_bundles(apps_path)? {
+                let bundle_dir = elf_path.parent().expect("app.elf is inside its bundle");
+                app_manifest_hashed_files(bundle_dir)?;
+                let app_version = app_signing_version(
+                    bundle_dir,
+                    &manifest_path,
+                    "keyos/apps",
+                    firmware_version,
+                )?;
+                for app_file in [elf_path, manifest_path] {
+                    let app_file_str = app_file.to_string_lossy().to_string();
+                    let app_status = check_signatures(&app_file_str)?;
+                    anyhow::ensure!(
+                        app_status.version.as_deref() == Some(app_version.as_str()),
+                        "{} has cosign2 version {:?}, expected app version {:?}",
+                        app_file.display(),
+                        app_status.version.as_deref().unwrap_or("<missing>"),
+                        app_version
+                    );
+                    if app_status.trusted_signature_count()? < required_signatures {
+                        all_signed = false;
+                        unsigned_files.push(app_file_str);
                     }
                 }
             }
@@ -862,9 +1455,9 @@ fn create_tar(
     println!("{} All files have sufficient signatures", "✓".green());
 
     // Expand ~ in config path
-    let expanded_config = if config_path.starts_with("~/") {
+    let expanded_config = if let Some(config_path) = config_path.strip_prefix("~/") {
         let home = std::env::var("HOME").context("HOME environment variable not set")?;
-        format!("{}/{}", home, &config_path[2..])
+        format!("{}/{}", home, config_path)
     } else {
         config_path.to_string()
     };
@@ -944,7 +1537,10 @@ fn create_tar(
             files_to_include.push(boot_signed_cip);
             bootloader_rename = Some(("boot-signed.cip".to_string(), "boot.cip".to_string()));
         } else if Path::new(&boot_signed_bin).exists() {
-            println!("{} Including signed bootloader: boot-signed.bin (renamed to boot.bin in tar)", "→".blue());
+            println!(
+                "{} Including signed bootloader: boot-signed.bin (renamed to boot.bin in tar)",
+                "→".blue()
+            );
             files_to_include.push(boot_signed_bin);
             bootloader_rename = Some(("boot-signed.bin".to_string(), "boot.bin".to_string()));
             is_dev_build = true;
@@ -1091,30 +1687,33 @@ fn create_tar(
     // If we need to rename the bootloader, do it before creating the tar
     // (macOS tar doesn't support --transform, so we rename the file temporarily)
     // We also need to temporarily move the original boot.cip out of the way
-    let bootloader_renamed_path: Option<(String, String, Option<String>)> = if let Some((from, to)) = &bootloader_rename {
-        let from_path = format!("{}/{}", version_folder, from);
-        let to_path = format!("{}/{}", version_folder, to);
-        let backup_path = format!("{}/{}.original", version_folder, to);
+    let bootloader_renamed_path: Option<(String, String, Option<String>)> =
+        if let Some((from, to)) = &bootloader_rename {
+            let from_path = format!("{}/{}", version_folder, from);
+            let to_path = format!("{}/{}", version_folder, to);
+            let backup_path = format!("{}/{}.original", version_folder, to);
 
-        // If the target file exists (e.g., boot.cip), move it out of the way
-        let had_original = if Path::new(&to_path).exists() {
-            fs::rename(&to_path, &backup_path).context(format!("Failed to backup {} to {}", to, backup_path))?;
-            Some(backup_path)
+            // If the target file exists (e.g., boot.cip), move it out of the way
+            let had_original = if Path::new(&to_path).exists() {
+                fs::rename(&to_path, &backup_path)
+                    .context(format!("Failed to backup {} to {}", to, backup_path))?;
+                Some(backup_path)
+            } else {
+                None
+            };
+
+            fs::rename(&from_path, &to_path)
+                .context(format!("Failed to rename {} to {}", from, to))?;
+            // Update files_to_include to use the new name
+            for file in &mut files_to_include {
+                if file.ends_with(from) {
+                    *file = to_path.clone();
+                }
+            }
+            Some((from_path, to_path, had_original))
         } else {
             None
         };
-
-        fs::rename(&from_path, &to_path).context(format!("Failed to rename {} to {}", from, to))?;
-        // Update files_to_include to use the new name
-        for file in &mut files_to_include {
-            if file.ends_with(from) {
-                *file = to_path.clone();
-            }
-        }
-        Some((from_path, to_path, had_original))
-    } else {
-        None
-    };
 
     // Build the tar command with an explicit file list
     let mut tar_cmd = Command::new("tar");
@@ -1155,9 +1754,9 @@ fn create_tar(
         .ok()
         .and_then(|cwd| {
             let path_str = cwd.to_string_lossy();
-            path_str.find(".worktrees").map(|idx| {
-                format!("{}/{}", &path_str[idx..], tar_file)
-            })
+            path_str
+                .find(".worktrees")
+                .map(|idx| format!("{}/{}", &path_str[idx..], tar_file))
         })
         .unwrap_or_else(|| tar_file.clone());
 
@@ -1307,11 +1906,11 @@ fn validate(
     let required_sigs = if dev_mode { 1 } else { 2 };
 
     // Helper to check if signature count meets requirement
-    let check_sig_requirement = |status: &SignatureStatus| -> bool {
+    let check_sig_requirement = |status: &SignatureStatus| -> Result<bool> {
         if dev_mode {
-            status.has_first_signature
+            Ok(status.has_any_signature())
         } else {
-            status.has_second_signature
+            Ok(status.trusted_signature_count()? == 2)
         }
     };
 
@@ -1340,7 +1939,15 @@ fn validate(
         all_valid = false;
     } else {
         let recovery_status = check_signatures_quiet(&recovery_bin)?;
-        if check_sig_requirement(&recovery_status) {
+        if recovery_status.has_header {
+            anyhow::ensure!(
+                recovery_status.version.as_deref() == Some(firmware_version),
+                "recovery.bin has cosign2 version {:?}, expected {:?}",
+                recovery_status.version.as_deref().unwrap_or("<missing>"),
+                firmware_version
+            );
+        }
+        if check_sig_requirement(&recovery_status)? {
             println!("  {} recovery.bin", "✓".green());
         } else {
             println!(
@@ -1362,7 +1969,15 @@ fn validate(
         all_valid = false;
     } else {
         let app_status = check_signatures_quiet(&app_bin)?;
-        if check_sig_requirement(&app_status) {
+        if app_status.has_header {
+            anyhow::ensure!(
+                app_status.version.as_deref() == Some(firmware_version),
+                "keyos/app.bin has cosign2 version {:?}, expected {:?}",
+                app_status.version.as_deref().unwrap_or("<missing>"),
+                firmware_version
+            );
+        }
+        if check_sig_requirement(&app_status)? {
             println!("  {} keyos/app.bin", "✓".green());
         } else {
             println!(
@@ -1405,6 +2020,17 @@ fn validate(
 
                 if elf_path.exists() || manifest_path.exists() {
                     app_count += 1;
+                    let expected_version = if elf_path.is_file() && manifest_path.is_file() {
+                        app_manifest_hashed_files(&path)?;
+                        Some(app_signing_version(
+                            &path,
+                            &manifest_path,
+                            relative_dir,
+                            firmware_version,
+                        )?)
+                    } else {
+                        None
+                    };
 
                     for (file_name, file_path) in
                         [("app.elf", &elf_path), ("manifest.json", &manifest_path)]
@@ -1419,7 +2045,19 @@ fn validate(
 
                         let file_path_str = file_path.to_string_lossy();
                         let status = check_signatures_quiet(&file_path_str)?;
-                        if check_sig_requirement(&status) {
+                        if status.has_header {
+                            let expected_version = expected_version
+                                .as_deref()
+                                .context("Signed app bundle is missing a complete manifest")?;
+                            anyhow::ensure!(
+                                status.version.as_deref() == Some(expected_version),
+                                "{} has cosign2 version {:?}, expected app version {:?}",
+                                file_path.display(),
+                                status.version.as_deref().unwrap_or("<missing>"),
+                                expected_version
+                            );
+                        }
+                        if check_sig_requirement(&status)? {
                             println!("  {} {}", "✓".green(), relative_path);
                         } else {
                             println!(
@@ -1435,8 +2073,10 @@ fn validate(
                     }
 
                     if relative_dir == "sideload-apps" {
-                        let archive_path = apps_path.join(format!("{app_name}.{APP_ARCHIVE_EXTENSION}"));
-                        let relative_path = format!("{relative_dir}/{app_name}.{APP_ARCHIVE_EXTENSION}");
+                        let archive_path =
+                            apps_path.join(format!("{app_name}.{APP_ARCHIVE_EXTENSION}"));
+                        let relative_path =
+                            format!("{relative_dir}/{app_name}.{APP_ARCHIVE_EXTENSION}");
                         if !archive_path.is_file() {
                             println!("  {} {} is missing", "✗".red(), relative_path);
                             missing_files.push(relative_path);
@@ -1578,17 +2218,58 @@ fn check_signatures_quiet(file_path: &str) -> Result<SignatureStatus> {
 }
 
 fn cosign2_dump_version(stdout: &str) -> Option<String> {
-    stdout
-        .lines()
-        .find_map(|line| line.strip_prefix("version").map(str::trim))
-        .filter(|version| !version.is_empty())
-        .map(str::to_string)
+    cosign2_dump_field(stdout, "version")
+}
+
+fn cosign2_dump_field(stdout: &str, field: &str) -> Option<String> {
+    stdout.lines().find_map(|line| {
+        let mut columns = line.split_whitespace();
+        (columns.next()? == field)
+            .then(|| columns.next().map(str::to_string))
+            .flatten()
+    })
+}
+
+fn cosign2_slot_present(stdout: &str, field: &str) -> Result<bool> {
+    let signature = cosign2_dump_signature(stdout, field)
+        .with_context(|| format!("cosign2 dump omitted {field}"))?;
+    anyhow::ensure!(
+        signature.len() == 128 && signature.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "cosign2 dump returned an invalid {field}"
+    );
+    Ok(!signature.bytes().all(|byte| byte == b'0'))
+}
+
+fn cosign2_dump_signature(stdout: &str, field: &str) -> Option<String> {
+    let mut lines = stdout.lines();
+    while let Some(line) = lines.next() {
+        let mut columns = line.split_whitespace();
+        let Some(name) = columns.next() else {
+            continue;
+        };
+        if name != field {
+            continue;
+        }
+        let mut signature = columns.next()?.to_ascii_lowercase();
+        let continuation = lines.next()?;
+        if !continuation.starts_with(char::is_whitespace) {
+            return None;
+        }
+        let mut columns = continuation.split_whitespace();
+        signature.push_str(columns.next()?);
+        if columns.next().is_some() {
+            return None;
+        }
+        return Some(signature);
+    }
+    None
 }
 
 fn check_signatures_impl(file_path: &str, verbose: bool) -> Result<SignatureStatus> {
     // Run cosign2 dump and capture output
     let output = Command::new("cosign2")
         .args(["dump", "--input", file_path])
+        .env("NO_COLOR", "1")
         .output()
         .context(format!("Failed to execute cosign2 dump for {}", file_path))?;
 
@@ -1596,65 +2277,65 @@ fn check_signatures_impl(file_path: &str, verbose: bool) -> Result<SignatureStat
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
     // Check if the file has no header
-    if !output.status.success()
-        || stderr.contains("no header found")
-        || stdout.contains("no header found")
-    {
+    let no_header = stderr.contains("no header found") || stdout.contains("no header found");
+    if no_header {
         if verbose {
             println!("  {} {} has no signatures", "✗".red(), file_path);
         }
         return Ok(SignatureStatus {
             has_header: false,
-            has_first_signature: false,
-            has_second_signature: false,
+            slot1_present: false,
+            slot2_present: false,
+            pubkey1: None,
+            pubkey2: None,
             version: None,
         });
     }
+    anyhow::ensure!(
+        output.status.success(),
+        "cosign2 rejected {}: {}",
+        file_path,
+        stderr.trim()
+    );
 
     let version = cosign2_dump_version(&stdout);
-
-    // Check for zero signatures in signature2
-    let re_sig2 = Regex::new(r"signature2.*0{64}")?;
-    if re_sig2.is_match(&stdout) {
-        if verbose {
-            println!("  {} {} has only one signature", "⚠".yellow(), file_path);
-        }
-        return Ok(SignatureStatus {
-            has_header: true,
-            has_first_signature: true,
-            has_second_signature: false,
-            version,
-        });
-    }
-
-    // Check for zero signatures in signature1
-    let re_sig1 = Regex::new(r"signature1.*0{64}")?;
-    if re_sig1.is_match(&stdout) {
-        if verbose {
-            println!(
-                "  {} {} has a header but no valid signatures",
+    let slot1_present = cosign2_slot_present(&stdout, "signature1")?;
+    let slot2_present = cosign2_slot_present(&stdout, "signature2")?;
+    let status = SignatureStatus {
+        has_header: true,
+        slot1_present,
+        slot2_present,
+        pubkey1: slot1_present
+            .then(|| cosign2_dump_field(&stdout, "pubkey1"))
+            .flatten(),
+        pubkey2: slot2_present
+            .then(|| cosign2_dump_field(&stdout, "pubkey2"))
+            .flatten(),
+        version,
+    };
+    if verbose {
+        match status.signature_count() {
+            2 => println!("  {} {} has two signatures", "✓".green(), file_path),
+            1 if status.is_developer_signed() => {
+                println!(
+                    "  {} {} has one developer signature",
+                    "⚠".yellow(),
+                    file_path
+                )
+            }
+            1 => println!(
+                "  {} {} has one production signature",
+                "⚠".yellow(),
+                file_path
+            ),
+            _ => println!(
+                "  {} {} has a header but no signatures",
                 "✗".red(),
                 file_path
-            );
+            ),
         }
-        return Ok(SignatureStatus {
-            has_header: true,
-            has_first_signature: false,
-            has_second_signature: false,
-            version,
-        });
     }
-
-    // If we get here, the file has two signatures
-    if verbose {
-        println!("  {} {} has two signatures", "✓".green(), file_path);
-    }
-    Ok(SignatureStatus {
-        has_header: true,
-        has_first_signature: true,
-        has_second_signature: true,
-        version,
-    })
+    Ok(status)
 }
 
 fn generate_manifest(
@@ -1840,8 +2521,10 @@ fn calculate_binary_hash(file_path: &str) -> Result<String> {
 
     // Hash only the binary content after the header
     let mut hasher = Sha256::new();
-    io::copy(&mut file, &mut hasher)
-        .context(format!("Failed to read binary content for hashing: {}", file_path))?;
+    io::copy(&mut file, &mut hasher).context(format!(
+        "Failed to read binary content for hashing: {}",
+        file_path
+    ))?;
 
     let hash = hasher.finalize();
     Ok(hex::encode(hash))
@@ -1866,7 +2549,9 @@ fn collect_files_recursive(dir: &Path, files: &mut Vec<String>) -> Result<()> {
         return Ok(());
     }
 
-    for entry in fs::read_dir(dir).context(format!("Failed to read directory: {}", dir.display()))? {
+    for entry in
+        fs::read_dir(dir).context(format!("Failed to read directory: {}", dir.display()))?
+    {
         let entry = entry.context("Failed to read directory entry")?;
         let path = entry.path();
 
@@ -1878,6 +2563,138 @@ fn collect_files_recursive(dir: &Path, files: &mut Vec<String>) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn release_signature_progress(
+    version_folder: &str,
+    firmware_version: &str,
+    developer: bool,
+) -> Result<u8> {
+    let root = Path::new(version_folder);
+    let mut any_signed = false;
+    let mut all_started = true;
+    let mut all_ready = true;
+
+    for relative in ["keyos/app.bin", "recovery.bin"] {
+        let path = root.join(relative);
+        anyhow::ensure!(
+            path.is_file(),
+            "Required release file is missing: {}",
+            path.display()
+        );
+        let status = check_signatures_quiet(&path.to_string_lossy())?;
+        if status.has_header {
+            anyhow::ensure!(
+                status.version.as_deref() == Some(firmware_version),
+                "{} has cosign2 version {:?}, expected {:?}",
+                path.display(),
+                status.version.as_deref().unwrap_or("<missing>"),
+                firmware_version
+            );
+        }
+        any_signed |= status.has_any_signature();
+        let trusted_count = status.trusted_signature_count()?;
+        all_started &= trusted_count >= 1;
+        all_ready &= if developer {
+            trusted_count >= 1
+        } else {
+            trusted_count == 2
+        };
+    }
+
+    let signed_bootloader = ["boot-signed.cip", "boot-signed.bin"]
+        .into_iter()
+        .map(|name| root.join(name))
+        .find(|path| path.is_file());
+    if let Some(path) = signed_bootloader {
+        let status = check_signatures_quiet(&path.to_string_lossy())?;
+        anyhow::ensure!(
+            status.version.as_deref() == Some(firmware_version),
+            "{} has cosign2 version {:?}, expected {:?}",
+            path.display(),
+            status.version.as_deref().unwrap_or("<missing>"),
+            firmware_version
+        );
+        any_signed |= status.has_any_signature();
+        let trusted_count = status.trusted_signature_count()?;
+        all_started &= trusted_count >= 1;
+        all_ready &= if developer {
+            trusted_count >= 1
+        } else {
+            trusted_count == 2
+        };
+    } else if root.join("boot.cip").is_file() || root.join("boot.bin").is_file() {
+        all_started = false;
+        all_ready = false;
+    }
+
+    for relative_dir in APP_BUNDLE_DIRS {
+        let apps_dir = root.join(relative_dir);
+        if !apps_dir.is_dir() {
+            anyhow::ensure!(
+                relative_dir != "keyos/apps",
+                "Required app directory is missing: {}",
+                apps_dir.display()
+            );
+            continue;
+        }
+        let bundles = collect_app_bundles(&apps_dir)?;
+        anyhow::ensure!(
+            relative_dir != "keyos/apps" || !bundles.is_empty(),
+            "No built-in app bundles found in {}",
+            apps_dir.display()
+        );
+        for (elf_path, manifest_path) in bundles {
+            let bundle_dir = elf_path.parent().expect("app.elf is inside its bundle");
+            app_manifest_hashed_files(bundle_dir)?;
+            let app_version =
+                app_signing_version(bundle_dir, &manifest_path, relative_dir, firmware_version)?;
+            for path in [elf_path, manifest_path] {
+                let status = check_signatures_quiet(&path.to_string_lossy())?;
+                if status.has_header {
+                    anyhow::ensure!(
+                        status.version.as_deref() == Some(app_version.as_str()),
+                        "{} has cosign2 version {:?}, expected app version {:?}",
+                        path.display(),
+                        status.version.as_deref().unwrap_or("<missing>"),
+                        app_version
+                    );
+                }
+                any_signed |= status.has_any_signature();
+                let started = if developer {
+                    status.is_developer_signed()
+                } else {
+                    status.trusted_signature_count()? >= 1
+                };
+                all_started &= started;
+                all_ready &= if developer {
+                    started
+                } else {
+                    status.trusted_signature_count()? == 2
+                };
+            }
+        }
+    }
+
+    normalize_signature_progress(any_signed, all_started, all_ready)
+}
+
+fn normalize_signature_progress(
+    any_signed: bool,
+    all_started: bool,
+    all_ready: bool,
+) -> Result<u8> {
+    if all_ready {
+        Ok(2)
+    } else if !any_signed {
+        Ok(0)
+    } else {
+        anyhow::ensure!(
+            all_started,
+            "Release has an inconsistent partial-signing state; every required file must have a first signature"
+        );
+        Ok(1)
+    }
 }
 
 fn package_release(version_folder: &str, firmware_version: &str, output_path: &str) -> Result<()> {
@@ -1916,6 +2733,12 @@ fn package_release(version_folder: &str, firmware_version: &str, output_path: &s
     } else if Path::new(&boot_bin).exists() {
         files_to_package.push(boot_bin);
     }
+    for signed_bootloader in ["boot-signed.cip", "boot-signed.bin"] {
+        let path = Path::new(version_folder).join(signed_bootloader);
+        if path.is_file() {
+            files_to_package.push(path.to_string_lossy().to_string());
+        }
+    }
 
     // Carry every file named by each app manifest so an offline signer can produce the same
     // final installable archive as a direct signing run.
@@ -1933,16 +2756,17 @@ fn package_release(version_folder: &str, firmware_version: &str, output_path: &s
     files_to_package.sort();
     files_to_package.dedup();
 
-    // Check signature status of app.bin to determine naming
+    // Summarize the complete signing set; one early second signature must not hide later files.
     println!("\nChecking current signature status...");
-    let sig_status = check_signatures_quiet(&app_bin)?;
-    let sig_count = sig_status.signature_count();
+    let sig_count = release_signature_progress(version_folder, firmware_version, false)?;
 
     if sig_count >= 2 {
         println!(
             "\n{} {}",
             "✓".green().bold(),
-            "All files already have 2 signatures. No more signatures required.".green().bold()
+            "All files already have 2 signatures. No more signatures required."
+                .green()
+                .bold()
         );
         return Ok(());
     }
@@ -1955,8 +2779,14 @@ fn package_release(version_folder: &str, firmware_version: &str, output_path: &s
     };
 
     let path = Path::new(output_path);
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Release");
-    let parent = path.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Release");
+    let parent = path
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
     let final_output_path = if parent.is_empty() {
         format!("{}{}.zip", stem, suffix)
     } else {
@@ -1975,15 +2805,17 @@ fn package_release(version_folder: &str, firmware_version: &str, output_path: &s
     println!(
         "  {} signature(s) found, creating: {}",
         sig_count,
-        Path::new(&final_output_path).file_name().unwrap_or_default().to_string_lossy()
+        Path::new(&final_output_path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
     );
 
     // Create the zip file
     let zip_file = File::create(&final_output_path)
         .context(format!("Failed to create zip file: {}", final_output_path))?;
     let mut zip = ZipWriter::new(zip_file);
-    let options = SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     println!("\nAdding files to zip:");
     for file_path in &files_to_package {
@@ -1997,9 +2829,7 @@ fn package_release(version_folder: &str, firmware_version: &str, output_path: &s
 
         zip.start_file(relative_path, options)?;
         let mut file = File::open(file_path)?;
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)?;
-        zip.write_all(&buffer)?;
+        io::copy(&mut file, &mut zip)?;
 
         println!(" {}", "✓".green());
     }
@@ -2009,8 +2839,8 @@ fn package_release(version_folder: &str, firmware_version: &str, output_path: &s
     let version_info = VersionInfo {
         version: firmware_version.to_string(),
     };
-    let version_json = serde_json::to_string_pretty(&version_info)
-        .context("Failed to serialize version.json")?;
+    let version_json =
+        serde_json::to_string_pretty(&version_info).context("Failed to serialize version.json")?;
     zip.start_file("version.json", options)?;
     zip.write_all(version_json.as_bytes())?;
     println!(" {}", "✓".green());
@@ -2020,7 +2850,7 @@ fn package_release(version_folder: &str, firmware_version: &str, output_path: &s
     println!(
         "\n{} {} ({} files)\n",
         "✓".green().bold(),
-        format!("Package created: {}", final_output_path).green().bold(),
+        format!("Package created: {}", absolute_path).green().bold(),
         files_to_package.len() + 1 // +1 for version.json
     );
 
@@ -2039,9 +2869,9 @@ fn sign_zip(
     );
 
     // Expand ~ in config path
-    let expanded_config = if config_path.starts_with("~/") {
+    let expanded_config = if let Some(config_path) = config_path.strip_prefix("~/") {
         let home = std::env::var("HOME").context("HOME environment variable not set")?;
-        format!("{}/{}", home, &config_path[2..])
+        format!("{}/{}", home, config_path)
     } else {
         config_path.to_string()
     };
@@ -2051,63 +2881,68 @@ fn sign_zip(
     }
 
     // Read version from version.json in the zip
-    let zip_file = File::open(input_path)
-        .context(format!("Failed to open zip file: {}", input_path))?;
+    let zip_file =
+        File::open(input_path).context(format!("Failed to open zip file: {}", input_path))?;
     let mut archive = ZipArchive::new(zip_file)?;
+    let entries = validated_zip_entries(&mut archive)?;
+    anyhow::ensure!(
+        entries
+            .iter()
+            .filter(|path| path.as_path() == Path::new("version.json"))
+            .count()
+            == 1,
+        "Zip must contain exactly one version.json"
+    );
 
     let version_info: VersionInfo = {
         let mut version_file = archive
             .by_name("version.json")
             .context("version.json not found in zip file. This zip may have been created with an older version of the signer tool.")?;
+        anyhow::ensure!(version_file.size() <= 4096, "version.json is too large");
         let mut contents = String::new();
         version_file
+            .by_ref()
+            .take(4097)
             .read_to_string(&mut contents)
             .context("Failed to read version.json")?;
+        anyhow::ensure!(contents.len() <= 4096, "version.json is too large");
         serde_json::from_str(&contents).context("Failed to parse version.json")?
     };
 
     let version = &version_info.version;
     let firmware_version = strip_v_prefix(version);
+    validate_keyos_version(&firmware_version)?;
     println!("  {} Version from zip: {}", "→".blue(), version);
 
     // Create temp directory
     let temp_dir = TempDir::new().context("Failed to create temp directory")?;
     let temp_path = temp_dir.path();
+    let version_folder = temp_path.join("release");
 
     println!("Extracting to temporary directory...");
 
     // Re-open the archive since we consumed it reading version.json
-    let zip_file = File::open(input_path)
-        .context(format!("Failed to open zip file: {}", input_path))?;
+    let zip_file =
+        File::open(input_path).context(format!("Failed to open zip file: {}", input_path))?;
     let mut archive = ZipArchive::new(zip_file)?;
+    let entries = validated_zip_entries(&mut archive)?;
+    let extracted_count = extract_zip_archive(&mut archive, &entries, &version_folder, false)?;
 
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i)?;
-        let outpath = temp_path.join(version).join(file.name());
-
-        if file.is_dir() {
-            fs::create_dir_all(&outpath)?;
-        } else {
-            if let Some(parent) = outpath.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let mut outfile = File::create(&outpath)?;
-            io::copy(&mut file, &mut outfile)?;
-        }
-    }
-
-    println!("{} Extracted {} files", "✓".green(), archive.len());
+    println!("{} Extracted {} files", "✓".green(), extracted_count);
 
     // Sign the files using existing sign_files function
-    let version_folder = temp_path.join(version);
     let version_folder_str = version_folder.to_string_lossy().to_string();
 
-    sign_files(&version_folder_str, &expanded_config, &firmware_version, is_developer)?;
+    sign_files(
+        &version_folder_str,
+        &expanded_config,
+        &firmware_version,
+        is_developer,
+    )?;
 
-    // Check signature status after signing to determine output filename
-    let app_bin = version_folder.join("keyos/app.bin");
-    let sig_status = check_signatures_quiet(&app_bin.to_string_lossy())?;
-    let sig_count = sig_status.signature_count();
+    // Check the complete signing set after signing to determine the output filename.
+    let sig_count =
+        release_signature_progress(&version_folder_str, &firmware_version, is_developer)?;
 
     let suffix = match sig_count {
         0 => "-unsigned",
@@ -2116,13 +2951,20 @@ fn sign_zip(
     };
 
     // Determine final output path based on signature count
-    let final_output_path = if output_path.contains("-signed") || output_path.contains("-unsigned") || output_path.contains("-partially") || output_path.contains("-fully") {
+    let final_output_path = if output_path.contains("-signed")
+        || output_path.contains("-unsigned")
+        || output_path.contains("-partially")
+        || output_path.contains("-fully")
+    {
         // User provided explicit name, use it
         output_path.to_string()
     } else {
         // Generate name based on signature count
         let path = Path::new(output_path);
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Release");
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Release");
         // Remove any existing suffix pattern like "-signed"
         let clean_stem = stem.trim_end_matches("-signed");
         format!("{}{}.zip", clean_stem, suffix)
@@ -2131,32 +2973,31 @@ fn sign_zip(
     // Create output zip with signed files
     println!("\nCreating signed zip: {}", final_output_path);
 
-    let output_file = File::create(&final_output_path)
-        .context(format!("Failed to create output zip: {}", final_output_path))?;
+    let output_file = File::create(&final_output_path).context(format!(
+        "Failed to create output zip: {}",
+        final_output_path
+    ))?;
     let mut zip = ZipWriter::new(output_file);
-    let options = SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let mut packaged_names = HashSet::new();
 
     // Re-package the signed files
     let mut file_count = 0;
-    for i in 0..archive.len() {
+    for (i, relative_path) in entries.iter().enumerate() {
         let file = archive.by_index(i)?;
         if file.is_dir() {
             continue;
         }
 
-        let file_name = file.name();
-        let signed_file_path = temp_path.join(version).join(file_name);
+        let file_name = relative_path.to_string_lossy();
+        let signed_file_path = version_folder.join(relative_path);
 
         if signed_file_path.exists() {
-            zip.start_file(file_name, options)?;
+            zip.start_file(file_name.as_ref(), options)?;
             let mut signed_file = File::open(&signed_file_path)?;
-            let mut buffer = Vec::new();
-            signed_file.read_to_end(&mut buffer)?;
-            zip.write_all(&buffer)?;
+            io::copy(&mut signed_file, &mut zip)?;
             file_count += 1;
-            packaged_names.insert(file_name.to_string());
+            packaged_names.insert(file_name.into_owned());
         }
     }
 
@@ -2167,7 +3008,10 @@ fn sign_zip(
         let mut app_archives = Vec::new();
         for entry in fs::read_dir(&sideload_apps_dir)? {
             let path = entry?.path();
-            if path.extension().is_some_and(|extension| extension == APP_ARCHIVE_EXTENSION) {
+            if path
+                .extension()
+                .is_some_and(|extension| extension == APP_ARCHIVE_EXTENSION)
+            {
                 app_archives.push(path);
             }
         }
@@ -2215,7 +3059,9 @@ fn sign_zip(
     println!(
         "\n{} {} ({} files)\n",
         "✓".green().bold(),
-        format!("Signed zip created: {}", absolute_output).green().bold(),
+        format!("Signed zip created: {}", absolute_output)
+            .green()
+            .bold(),
         file_count
     );
 
@@ -2232,33 +3078,56 @@ fn unpack_zip(version_folder: &str, input_path: &str) -> Result<()> {
         return Err(SignerError::FileNotFound(input_path.to_string()).into());
     }
 
-    let zip_file = File::open(input_path)
-        .context(format!("Failed to open zip file: {}", input_path))?;
+    let zip_file =
+        File::open(input_path).context(format!("Failed to open zip file: {}", input_path))?;
     let mut archive = ZipArchive::new(zip_file)?;
+    let entries = validated_zip_entries(&mut archive)?;
+    anyhow::ensure!(
+        entries
+            .iter()
+            .filter(|path| path.as_path() == Path::new("version.json"))
+            .count()
+            == 1,
+        "Zip must contain exactly one version.json"
+    );
+
+    let version_info: VersionInfo = {
+        let mut version_file = archive.by_name("version.json")?;
+        anyhow::ensure!(version_file.size() <= 4096, "version.json is too large");
+        let mut contents = String::new();
+        version_file
+            .by_ref()
+            .take(4097)
+            .read_to_string(&mut contents)
+            .context("Failed to read version.json")?;
+        anyhow::ensure!(contents.len() <= 4096, "version.json is too large");
+        serde_json::from_str(&contents).context("Failed to parse version.json")?
+    };
+    let firmware_version = strip_v_prefix(&version_info.version);
+    validate_keyos_version(&firmware_version)?;
+    let target_version = Path::new(version_folder)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("Version folder name is not valid UTF-8")?;
+    anyhow::ensure!(
+        strip_v_prefix(target_version) == firmware_version,
+        "Zip contains version {:?}, but the destination is for {:?}",
+        firmware_version,
+        target_version
+    );
+
+    let temp_dir = TempDir::new().context("Failed to create temporary validation directory")?;
+    let validation_root = temp_dir.path().join("release");
+    extract_zip_archive(&mut archive, &entries, &validation_root, false)?;
+    let signature_progress =
+        release_signature_progress(&validation_root.to_string_lossy(), &firmware_version, false)?;
+    anyhow::ensure!(
+        signature_progress >= 1,
+        "Zip does not contain a complete first set of trusted signatures"
+    );
 
     println!("\nExtracting files:");
-    let mut file_count = 0;
-
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i)?;
-        if file.is_dir() {
-            continue;
-        }
-
-        let outpath = Path::new(version_folder).join(file.name());
-
-        print!("  {} {}...", "→".blue(), file.name());
-
-        if let Some(parent) = outpath.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let mut outfile = File::create(&outpath)?;
-        io::copy(&mut file, &mut outfile)?;
-
-        println!(" {}", "✓".green());
-        file_count += 1;
-    }
+    let file_count = extract_zip_archive(&mut archive, &entries, Path::new(version_folder), true)?;
 
     println!(
         "\n{} {} ({} files)",
@@ -2273,21 +3142,32 @@ fn unpack_zip(version_folder: &str, input_path: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
-    fn write_manifest(bundle_dir: &Path, signed: bool) {
+    fn sha256(data: &[u8]) -> String {
+        hex::encode(Sha256::digest(data))
+    }
+
+    fn write_bundle(bundle_dir: &Path) {
+        fs::create_dir_all(bundle_dir.join("resources")).unwrap();
+        fs::write(bundle_dir.join("app.elf"), b"\x7fELFapp payload").unwrap();
+        fs::write(bundle_dir.join("icon.bin"), b"icon").unwrap();
+        fs::write(bundle_dir.join("resources/logo.bin"), b"logo").unwrap();
         let json = serde_json::json!({
             "appName": { "en": "Example" },
             "appId": "0x00112233445566778899aabbccddeeff",
             "version": "1.2.3",
             "fileHashes": {
-                "resources/logo.bin": "00",
-                "icon.bin": "00",
-                "app.elf": "00"
+                "resources/logo.bin": sha256(b"logo"),
+                "icon.bin": sha256(b"icon"),
+                "app.elf": sha256(b"\x7fELFapp payload")
             }
         });
-        let mut bytes = if signed { vec![0; COSIGN2_HEADER_SIZE] } else { Vec::new() };
-        bytes.extend(serde_json::to_vec(&json).unwrap());
-        fs::write(bundle_dir.join(APP_MANIFEST_FILE), bytes).unwrap();
+        fs::write(
+            bundle_dir.join(APP_MANIFEST_FILE),
+            serde_json::to_vec(&json).unwrap(),
+        )
+        .unwrap();
     }
 
     fn app_archive_entry_names(archive_path: &Path) -> Vec<String> {
@@ -2303,11 +3183,7 @@ mod tests {
     fn packs_the_sdk_app_archive_layout_reproducibly() {
         let temp = tempfile::tempdir().unwrap();
         let bundle_dir = temp.path().join("example");
-        fs::create_dir_all(bundle_dir.join("resources")).unwrap();
-        fs::write(bundle_dir.join("app.elf"), b"signed elf").unwrap();
-        fs::write(bundle_dir.join("icon.bin"), b"icon").unwrap();
-        fs::write(bundle_dir.join("resources/logo.bin"), b"logo").unwrap();
-        write_manifest(&bundle_dir, true);
+        write_bundle(&bundle_dir);
 
         let first = temp.path().join("first.app");
         let second = temp.path().join("second.app");
@@ -2326,10 +3202,10 @@ mod tests {
     }
 
     #[test]
-    fn reads_file_hashes_before_and_after_cosign2_signing() {
+    fn reads_and_validates_manifest_hashes() {
         let temp = tempfile::tempdir().unwrap();
-        write_manifest(temp.path(), false);
-        let unsigned = app_manifest_hashed_files(temp.path()).unwrap();
+        write_bundle(temp.path());
+        let files = app_manifest_hashed_files(temp.path()).unwrap();
         assert_eq!(
             read_app_manifest(&temp.path().join(APP_MANIFEST_FILE))
                 .unwrap()
@@ -2337,23 +3213,121 @@ mod tests {
                 .as_deref(),
             Some("1.2.3")
         );
-        write_manifest(temp.path(), true);
-        let signed = app_manifest_hashed_files(temp.path()).unwrap();
-        assert_eq!(
-            read_app_manifest(&temp.path().join(APP_MANIFEST_FILE))
-                .unwrap()
-                .version
-                .as_deref(),
-            Some("1.2.3")
-        );
+        assert_eq!(files, ["app.elf", "icon.bin", "resources/logo.bin"]);
 
-        assert_eq!(unsigned, signed);
-        assert_eq!(unsigned, ["app.elf", "icon.bin", "resources/logo.bin"]);
+        fs::write(temp.path().join("icon.bin"), b"tampered").unwrap();
+        assert!(app_manifest_hashed_files(temp.path()).is_err());
     }
 
     #[test]
     fn reads_the_binary_version_from_cosign2_dump_output() {
-        let output = "magic      atsama5d27-keyos\nversion    1.22.1\nsize       123\n";
-        assert_eq!(cosign2_dump_version(output).as_deref(), Some("1.22.1"));
+        let output = "magic      atsama5d27-keyos\nversion    1.4.0-beta.2\nsize       123\n";
+        assert_eq!(
+            cosign2_dump_version(output).as_deref(),
+            Some("1.4.0-beta.2")
+        );
+    }
+
+    #[test]
+    fn reads_two_line_cosign2_signatures() {
+        let set = "signature1 da6e3dda6dc14bfa047f1c9eb32c021e409c66781ee278bb495312ed128ee91d\n           175681686943d35af1ce8eb17e928789315badaf4f8eb7a5ba83b08d4ab0543e\n";
+        let empty = "signature2 0000000000000000000000000000000000000000000000000000000000000000\n           0000000000000000000000000000000000000000000000000000000000000000\n";
+        assert!(cosign2_slot_present(set, "signature1").unwrap());
+        assert!(!cosign2_slot_present(empty, "signature2").unwrap());
+    }
+
+    #[test]
+    fn enforces_canonical_keyos_prereleases() {
+        for version in [
+            "1.4.0",
+            "1.4.0-alpha.1",
+            "1.4.0-alpha.126",
+            "1.4.0-beta.127",
+        ] {
+            validate_keyos_version(version).unwrap();
+        }
+        for version in [
+            "1.4.0-beta1",
+            "1.4.0-alpha10",
+            "1.4.0-beta.0",
+            "1.4.0-beta.128",
+            "1.4.0-alpha.127",
+            "1.4.0-rc.1",
+            "1.4.0+build",
+            "255.255.255-alpha.126",
+        ] {
+            assert!(validate_keyos_version(version).is_err(), "{version}");
+        }
+    }
+
+    #[test]
+    fn production_signatures_require_allowlisted_distinct_keys() {
+        let one = SignatureStatus {
+            has_header: true,
+            slot1_present: true,
+            slot2_present: false,
+            pubkey1: Some(PRODUCTION_SIGNERS[0].to_string()),
+            pubkey2: None,
+            version: Some("1.4.0-beta.2".to_string()),
+        };
+        assert_eq!(one.trusted_signature_count().unwrap(), 1);
+
+        let duplicate = SignatureStatus {
+            slot2_present: true,
+            pubkey2: Some(PRODUCTION_SIGNERS[0].to_string()),
+            ..one
+        };
+        assert!(duplicate.trusted_signature_count().is_err());
+
+        let unauthorized = SignatureStatus {
+            pubkey2: Some(
+                "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            ),
+            ..duplicate
+        };
+        assert!(unauthorized.trusted_signature_count().is_err());
+    }
+
+    #[test]
+    fn partial_release_requires_a_first_signature_on_every_file() {
+        assert_eq!(
+            normalize_signature_progress(false, false, false).unwrap(),
+            0
+        );
+        assert_eq!(normalize_signature_progress(true, true, false).unwrap(), 1);
+        assert_eq!(normalize_signature_progress(true, true, true).unwrap(), 2);
+        assert!(normalize_signature_progress(true, false, false).is_err());
+    }
+
+    #[test]
+    fn rejects_unsafe_zip_entries() {
+        let make_zip = |names: &[&str]| {
+            let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+            for name in names {
+                writer
+                    .start_file(*name, SimpleFileOptions::default())
+                    .unwrap();
+                writer.write_all(b"data").unwrap();
+            }
+            writer.finish().unwrap().into_inner()
+        };
+
+        for names in [vec!["../escape"], vec!["/absolute"]] {
+            let bytes = make_zip(&names);
+            let mut archive = ZipArchive::new(Cursor::new(bytes)).unwrap();
+            assert!(validated_zip_entries(&mut archive).is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_bundle_resources() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        write_bundle(temp.path());
+        fs::remove_file(temp.path().join("icon.bin")).unwrap();
+        symlink("resources/logo.bin", temp.path().join("icon.bin")).unwrap();
+        assert!(app_manifest_hashed_files(temp.path()).is_err());
     }
 }
