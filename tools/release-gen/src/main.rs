@@ -88,15 +88,22 @@ fn ota_patch_version(version: &str) -> anyhow::Result<String> {
         return Ok(base);
     }
 
-    let mut identifiers = version.pre.as_str().split('.');
-    let channel = identifiers.next().unwrap_or_default();
-    let sequence = identifiers
-        .next()
-        .and_then(|value| value.parse::<u16>().ok())
-        .with_context(|| format!("KeyOS prereleases must use alpha.N or beta.N: '{value}'"))?;
+    let prerelease = version.pre.as_str();
+    let (channel, sequence_value) = prerelease
+        .strip_prefix("alpha")
+        .map(|sequence| ("alpha", sequence))
+        .or_else(|| {
+            prerelease
+                .strip_prefix("beta")
+                .map(|sequence| ("beta", sequence))
+        })
+        .with_context(|| format!("KeyOS prereleases must use alphaN or betaN: '{value}'"))?;
+    let sequence = sequence_value
+        .parse::<u16>()
+        .with_context(|| format!("KeyOS prereleases must use alphaN or betaN: '{value}'"))?;
     anyhow::ensure!(
-        identifiers.next().is_none(),
-        "KeyOS prereleases must use alpha.N or beta.N: '{value}'"
+        sequence_value == sequence.to_string(),
+        "KeyOS prerelease sequences may not contain leading zeroes: '{value}'"
     );
     let wire_prerelease = match channel {
         "alpha" => {
@@ -113,20 +120,16 @@ fn ota_patch_version(version: &str) -> anyhow::Result<String> {
             );
             sequence
         }
-        _ => anyhow::bail!("KeyOS prereleases must use alpha.N or beta.N: '{value}'"),
+        _ => unreachable!("channel is restricted by the prefixes above"),
     };
     Ok(format!("{base}b{wire_prerelease}"))
 }
 
 fn base_ota_patch_version(version: &str) -> anyhow::Result<String> {
-    // 1.4.0-beta1 was published before canonical prerelease labels were enforced.
-    if version.strip_prefix('v').unwrap_or(version) == "1.4.0-beta1" {
-        return Ok("1.4.0b1".to_string());
-    }
     ota_patch_version(version)
 }
 
-fn updater_supports_canonical_prereleases(version: &str) -> bool {
+fn updater_supports_keyos_prereleases(version: &str) -> bool {
     let version = version.strip_prefix('v').unwrap_or(version);
     semver::Version::parse(version)
         .map(|version| version >= semver::Version::new(1, 4, 0))
@@ -139,7 +142,7 @@ fn manifest_patch_versions(
     base_wire_version: &str,
     new_wire_version: &str,
 ) -> (String, String) {
-    if updater_supports_canonical_prereleases(base_version) {
+    if updater_supports_keyos_prereleases(base_version) {
         (
             base_version
                 .strip_prefix('v')
@@ -270,7 +273,8 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
 
     for base_file in &base_src_files {
         if !new_src_files.contains(base_file) {
-            // Strip "keyos/" prefix for device paths (files are at /keyos.update/app.bin, not /keyos.update/keyos/app.bin)
+            // Strip "keyos/" prefix for device paths (files are at /keyos.update/app.bin,
+            // not /keyos.update/keyos/app.bin)
             let path = base_file
                 .strip_prefix("keyos")
                 .unwrap_or(base_file)

@@ -1,8 +1,12 @@
 use {
     crate::{
-        Args, base_ota_patch_version, manifest_patch_versions, ota_patch_version,
+        Args,
+        base_ota_patch_version,
+        manifest_patch_versions,
+        ota_patch_version,
         release_manifest::{Action, ReleaseManifest},
-        run, updater_supports_canonical_prereleases,
+        run,
+        updater_supports_keyos_prereleases,
     },
     std::{
         fs::File,
@@ -28,7 +32,7 @@ fn release_roundtrip() {
         .into();
     let base_ver = String::from("0.0.1");
     let base_dir = PathBuf::from("src/test/fixtures/base/");
-    let new_ver = String::from("0.0.2-beta.1");
+    let new_ver = String::from("0.0.2-beta1");
     let new_dir = PathBuf::from("src/test/fixtures/new/");
     let out_dir = PathBuf::from("src/test/fixtures/out");
     let out_path = out_dir.join("release.tar");
@@ -142,26 +146,31 @@ fn ota_patch_version_keeps_stable_versions() {
 
 #[test]
 fn ota_patch_version_maps_beta_versions() {
-    assert_eq!(ota_patch_version("1.4.0-beta.1").unwrap(), "1.4.0b1");
-    assert_eq!(ota_patch_version("v1.4.0-beta.127").unwrap(), "1.4.0b127");
+    assert_eq!(ota_patch_version("1.4.0-beta1").unwrap(), "1.4.0b1");
+    assert_eq!(ota_patch_version("1.4.0-beta2").unwrap(), "1.4.0b2");
+    assert_eq!(ota_patch_version("v1.4.0-beta127").unwrap(), "1.4.0b127");
 }
 
 #[test]
 fn ota_patch_version_maps_alpha_versions_to_a_distinct_wire_range() {
-    assert_eq!(ota_patch_version("1.4.0-alpha.1").unwrap(), "1.4.0b129");
-    assert_eq!(ota_patch_version("1.4.0-alpha.126").unwrap(), "1.4.0b254");
+    assert_eq!(ota_patch_version("1.4.0-alpha1").unwrap(), "1.4.0b129");
+    assert_eq!(ota_patch_version("1.4.0-alpha126").unwrap(), "1.4.0b254");
+    assert_eq!(
+        ota_patch_version("255.255.255-alpha126").unwrap(),
+        "255.255.255b254"
+    );
 }
 
 #[test]
 fn ota_patch_version_uses_the_top_bit_as_the_alpha_flag() {
-    let beta: u8 = ota_patch_version("1.4.0-beta.1")
+    let beta: u8 = ota_patch_version("1.4.0-beta1")
         .unwrap()
         .rsplit_once('b')
         .unwrap()
         .1
         .parse()
         .unwrap();
-    let alpha: u8 = ota_patch_version("1.4.0-alpha.1")
+    let alpha: u8 = ota_patch_version("1.4.0-alpha1")
         .unwrap()
         .rsplit_once('b')
         .unwrap()
@@ -175,21 +184,21 @@ fn ota_patch_version_uses_the_top_bit_as_the_alpha_flag() {
 }
 
 #[test]
-fn base_ota_patch_version_accepts_published_beta1() {
+fn base_ota_patch_version_accepts_keyos_prereleases() {
     assert_eq!(base_ota_patch_version("1.4.0-beta1").unwrap(), "1.4.0b1");
     assert_eq!(base_ota_patch_version("v1.4.0-beta1").unwrap(), "1.4.0b1");
 }
 
 #[test]
-fn canonical_manifest_prereleases_start_with_the_1_4_0_updater() {
-    assert!(!updater_supports_canonical_prereleases("1.3.1"));
-    assert!(!updater_supports_canonical_prereleases("1.4.0-beta1"));
-    assert!(updater_supports_canonical_prereleases("1.4.0"));
-    assert!(updater_supports_canonical_prereleases("v1.4.1-alpha.1"));
+fn keyos_manifest_prereleases_start_with_the_1_4_0_updater() {
+    assert!(!updater_supports_keyos_prereleases("1.3.1"));
+    assert!(!updater_supports_keyos_prereleases("1.4.0-beta1"));
+    assert!(updater_supports_keyos_prereleases("1.4.0"));
+    assert!(updater_supports_keyos_prereleases("v1.4.1-alpha1"));
 
     assert_eq!(
-        manifest_patch_versions("1.4.0", "1.4.1-alpha.1", "1.4.0", "1.4.1b129"),
-        ("1.4.0".to_string(), "1.4.1-alpha.1".to_string())
+        manifest_patch_versions("1.4.0", "1.4.1-alpha1", "1.4.0", "1.4.1b129"),
+        ("1.4.0".to_string(), "1.4.1-alpha1".to_string())
     );
     assert_eq!(
         manifest_patch_versions("1.4.0-beta1", "1.4.0", "1.4.0b1", "1.4.0"),
@@ -199,11 +208,12 @@ fn canonical_manifest_prereleases_start_with_the_1_4_0_updater() {
 
 #[test]
 fn ota_patch_version_rejects_unsupported_prereleases() {
-    assert!(ota_patch_version("1.4.0-alpha1").is_err());
-    assert!(ota_patch_version("1.4.0-beta1").is_err());
+    assert!(ota_patch_version("1.4.0-alpha.1").is_err());
+    assert!(ota_patch_version("1.4.0-beta.1").is_err());
+    assert!(ota_patch_version("1.4.0-beta01").is_err());
     assert!(ota_patch_version("1.4.0-beta.0").is_err());
-    assert!(ota_patch_version("1.4.0-beta.128").is_err());
-    assert!(ota_patch_version("1.4.0-alpha.127").is_err());
+    assert!(ota_patch_version("1.4.0-beta128").is_err());
+    assert!(ota_patch_version("1.4.0-alpha127").is_err());
     assert!(ota_patch_version("1.4.0-rc.1").is_err());
-    assert!(ota_patch_version("255.255.255-alpha.126").is_err());
+    assert!(ota_patch_version("256.255.255-alpha126").is_err());
 }

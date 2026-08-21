@@ -366,15 +366,22 @@ fn validate_keyos_version(value: &str) -> Result<()> {
         return Ok(());
     }
 
-    let mut identifiers = version.pre.as_str().split('.');
-    let channel = identifiers.next().unwrap_or_default();
-    let sequence = identifiers
-        .next()
-        .and_then(|value| value.parse::<u16>().ok())
-        .with_context(|| format!("KeyOS prereleases must use alpha.N or beta.N: {value:?}"))?;
+    let prerelease = version.pre.as_str();
+    let (channel, sequence_value) = prerelease
+        .strip_prefix("alpha")
+        .map(|sequence| ("alpha", sequence))
+        .or_else(|| {
+            prerelease
+                .strip_prefix("beta")
+                .map(|sequence| ("beta", sequence))
+        })
+        .with_context(|| format!("KeyOS prereleases must use alphaN or betaN: {value:?}"))?;
+    let sequence = sequence_value
+        .parse::<u16>()
+        .with_context(|| format!("KeyOS prereleases must use alphaN or betaN: {value:?}"))?;
     anyhow::ensure!(
-        identifiers.next().is_none(),
-        "KeyOS prereleases must use alpha.N or beta.N: {value:?}"
+        sequence_value == sequence.to_string(),
+        "KeyOS prerelease sequences may not contain leading zeroes: {value:?}"
     );
     match channel {
         "alpha" => anyhow::ensure!(
@@ -385,7 +392,7 @@ fn validate_keyos_version(value: &str) -> Result<()> {
             (1..=MAX_KEYOS_BETA_SEQUENCE).contains(&sequence),
             "KeyOS beta sequence must be between 1 and {MAX_KEYOS_BETA_SEQUENCE}: {value:?}"
         ),
-        _ => anyhow::bail!("KeyOS prereleases must use alpha.N or beta.N: {value:?}"),
+        _ => unreachable!("channel is restricted by the prefixes above"),
     }
     Ok(())
 }
@@ -3221,11 +3228,8 @@ mod tests {
 
     #[test]
     fn reads_the_binary_version_from_cosign2_dump_output() {
-        let output = "magic      atsama5d27-keyos\nversion    1.4.0-beta.2\nsize       123\n";
-        assert_eq!(
-            cosign2_dump_version(output).as_deref(),
-            Some("1.4.0-beta.2")
-        );
+        let output = "magic      atsama5d27-keyos\nversion    1.4.0-beta2\nsize       123\n";
+        assert_eq!(cosign2_dump_version(output).as_deref(), Some("1.4.0-beta2"));
     }
 
     #[test]
@@ -3237,24 +3241,27 @@ mod tests {
     }
 
     #[test]
-    fn enforces_canonical_keyos_prereleases() {
+    fn enforces_recovery_compatible_keyos_prereleases() {
         for version in [
             "1.4.0",
-            "1.4.0-alpha.1",
-            "1.4.0-alpha.126",
-            "1.4.0-beta.127",
+            "1.4.0-alpha1",
+            "1.4.0-alpha126",
+            "1.4.0-beta2",
+            "1.4.0-beta127",
         ] {
             validate_keyos_version(version).unwrap();
         }
+        validate_keyos_version("255.255.255-alpha126").unwrap();
         for version in [
-            "1.4.0-beta1",
-            "1.4.0-alpha10",
-            "1.4.0-beta.0",
-            "1.4.0-beta.128",
-            "1.4.0-alpha.127",
+            "1.4.0-alpha.1",
+            "1.4.0-beta.1",
+            "1.4.0-beta0",
+            "1.4.0-beta01",
+            "1.4.0-beta128",
+            "1.4.0-alpha127",
             "1.4.0-rc.1",
             "1.4.0+build",
-            "255.255.255-alpha.126",
+            "256.255.255-alpha126",
         ] {
             assert!(validate_keyos_version(version).is_err(), "{version}");
         }
@@ -3268,7 +3275,7 @@ mod tests {
             slot2_present: false,
             pubkey1: Some(PRODUCTION_SIGNERS[0].to_string()),
             pubkey2: None,
-            version: Some("1.4.0-beta.2".to_string()),
+            version: Some("1.4.0-beta2".to_string()),
         };
         assert_eq!(one.trusted_signature_count().unwrap(), 1);
 

@@ -41,6 +41,7 @@
           (with pkgs; [
             updiffPkg
             bzip2
+            git-lfs
             gnutar
             gzip
           ])
@@ -51,6 +52,11 @@
       in {
         default = keyosShell.overrideAttrs (keyos: {
           nativeBuildInputs = keyos.nativeBuildInputs ++ customPackages;
+          shellHook = (keyos.shellHook or "") + ''
+            if [ -e .git ] && [ -f .gitattributes ] && grep -q "filter=lfs" .gitattributes; then
+              git lfs install --local >/dev/null
+            fi
+          '';
         });
       }
     );
