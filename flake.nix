@@ -6,17 +6,12 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     keyos.url = "git+ssh://git@github.com/Foundation-Devices/KeyOS";
-    updiff = {
-      url = "git+ssh://git@github.com/Foundation-Devices/updiff";
-      flake = false;
-    };
   };
 
   outputs = {
     self,
     nixpkgs,
     keyos,
-    updiff,
   }: let
     inherit (nixpkgs) lib;
     forAllSystems = f: lib.genAttrs ["aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux"] f;
@@ -30,16 +25,8 @@
         keyosShell = keyos.devShells.${system}.build;
         keyosPackages = keyos.packages.${system};
 
-        updiffPkg = pkgs.rustPlatform.buildRustPackage {
-          pname = "updiff";
-          version = "0.1.0";
-          src = updiff;
-          cargoLock.lockFile = "${updiff}/Cargo.lock";
-        };
-
         customPackages =
           (with pkgs; [
-            updiffPkg
             bzip2
             git-lfs
             gnutar

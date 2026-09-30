@@ -76,8 +76,7 @@
     "root": {
       "inputs": {
         "keyos": "keyos",
-        "nixpkgs": "nixpkgs_2",
-        "updiff": "updiff"
+        "nixpkgs": "nixpkgs_2"
       }
     },
     "rust-analyzer-src": {
@@ -95,22 +94,6 @@
         "ref": "nightly",
         "repo": "rust-analyzer",
         "type": "github"
-      }
-    },
-    "updiff": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1770396717,
-        "narHash": "sha256-jkF8dbn/OqLypuTO1hPdjJYI4Pt5C14kVGcjLmAPdi0=",
-        "ref": "refs/heads/main",
-        "rev": "7449ea2a773725a2ccd1897f54fd1d7543b3d07e",
-        "revCount": 12,
-        "type": "git",
-        "url": "ssh://git@github.com/Foundation-Devices/updiff"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@github.com/Foundation-Devices/updiff"
       }
     }
   },

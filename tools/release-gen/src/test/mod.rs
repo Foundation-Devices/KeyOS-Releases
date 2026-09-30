@@ -27,8 +27,8 @@ impl Drop for CleanupGuard {
 
 #[test]
 fn release_roundtrip() {
-    let updiff_path: PathBuf = std::env::var("UPDIFF_PATH")
-        .unwrap_or_else(|_| String::from("updiff"))
+    let keyos_dir: PathBuf = std::env::var("KEYOS_DIR")
+        .unwrap_or_else(|_| String::from("../keyos"))
         .into();
     let base_ver = String::from("0.0.1");
     let base_dir = PathBuf::from("src/test/fixtures/base/");
@@ -46,7 +46,7 @@ fn release_roundtrip() {
         mandatory: true,
         reboot_required: false,
         out: out_path.clone(),
-        updiff_path,
+        keyos_dir,
         force: true,
     };
 

@@ -24,7 +24,8 @@ const MAX_ALPHA_SEQUENCE: u16 = u8::MAX as u16 - ALPHA_WIRE_FLAG - 1;
 /// that contains the manifest describing what actions to perform to reach the
 /// destination directory state starting from the source one.
 ///
-/// Uses the `updiff` tool. See: https://github.com/Foundation-Devices/updiff
+/// Builds the patch bodies with `cargo xtask build-patches` in the keyos
+/// repository.
 #[derive(Parser, Debug)]
 pub struct Args {
     /// Version before the update.
@@ -50,10 +51,10 @@ pub struct Args {
     /// Example: ./out/release.tar
     #[arg(short, long, default_value = "release.tar")]
     pub out: PathBuf,
-    /// Path to the `updiff` tool binary. If not specified, it is assumed that
-    /// `updiff` is accessible from CWD.
-    #[arg(long, default_value = "updiff")]
-    pub updiff_path: PathBuf,
+    /// Path to the keyos repository, whose `cargo xtask build-patches` writes
+    /// the patch bodies.
+    #[arg(long, default_value = "../keyos")]
+    pub keyos_dir: PathBuf,
     /// Overwrite existing output files without prompting.
     #[arg(long)]
     pub force: bool,
@@ -159,19 +160,11 @@ fn manifest_patch_versions(
 }
 
 pub fn run(args: Args) -> anyhow::Result<()> {
-    println!("[INFO] verifying `updiff` tool access");
-
-    if let Err(err) = Command::new(args.updiff_path.as_os_str()).output() {
-        if err.to_string().contains("No such file or directory") {
-            anyhow::bail!(
-                r"updiff tool not found at {}
-Please make sure it's in your PATH or specify the path where it is installed. See `--help` for more information.",
-                abs_path(args.updiff_path)
-            );
-        } else {
-            anyhow::bail!("could not run updiff tool: {}", err.to_string());
-        }
-    }
+    anyhow::ensure!(
+        args.keyos_dir.join("Cargo.toml").is_file(),
+        "keyos repository not found at {}. Pass --keyos-dir.",
+        abs_path(&args.keyos_dir)
+    );
 
     let base_patch_version = base_ota_patch_version(&args.base_version)?;
     let new_patch_version = ota_patch_version(&args.new_version)?;
@@ -288,34 +281,6 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
             let new_file_full = args.new.clone().join(base_file);
 
             if !files_have_same_content(&base_file_full, &new_file_full)? {
-                let patch_file = out_patch_dir.clone().join(base_file);
-                let patch_file_parent = patch_file
-                    .parent()
-                    .expect("Patch file should have a parent");
-                fs::create_dir_all(patch_file_parent)
-                    .with_context(|| format!("Creating dir: {}", abs_path(patch_file_parent)))?;
-
-                let output = Command::new(args.updiff_path.as_os_str())
-                    .arg(&base_patch_version)
-                    .arg(base_file_full)
-                    .arg(&new_patch_version)
-                    .arg(new_file_full)
-                    .arg(&patch_file)
-                    .arg("--force")
-                    .output()
-                    .context("Running updiff command")?;
-
-                anyhow::ensure!(
-                    output.status.success(),
-                    "updiff command failed: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-
-                let patch_metadata = fs::metadata(&patch_file).with_context(|| {
-                    format!("Reading patch file metadata: {}", abs_path(&patch_file))
-                })?;
-                let patch_size = patch_metadata.len();
-
                 // patch_file keeps keyos/ prefix (file is at /release/patch/keyos/app.bin)
                 let patch_file_path = base_file.to_str().expect(PATH_TO_STR_ERROR).to_string();
                 // patch_source strips keyos/ prefix (device file is at /keyos.update/app.bin)
@@ -332,11 +297,7 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
                     base_version: format!("v{base_manifest_version}"),
                     new_version: format!("v{new_manifest_version}"),
                 });
-                println!(
-                    "[INFO] action/patch ({}): {}",
-                    format_size(patch_size),
-                    base_file.display(),
-                );
+                println!("[INFO] action/patch: {}", base_file.display());
             }
         }
     }
@@ -397,6 +358,23 @@ Please make sure it's in your PATH or specify the path where it is installed. Se
         .context("Writing to manifest.json")?;
 
     manifest_file.sync_all()?;
+
+    println!("[INFO] building patches");
+
+    let status = Command::new("cargo")
+        .current_dir(&args.keyos_dir)
+        .arg("xtask")
+        .arg("build-patches")
+        .arg(std::path::absolute(&manifest_file_path)?)
+        .arg("--base")
+        .arg(std::path::absolute(&args.base)?)
+        .arg("--new")
+        .arg(std::path::absolute(&args.new)?)
+        .arg("--out")
+        .arg(std::path::absolute(&out_patch_dir)?)
+        .status()
+        .context("Running cargo xtask build-patches")?;
+    anyhow::ensure!(status.success(), "cargo xtask build-patches failed");
 
     println!("[INFO] creating release tar");
 
@@ -509,17 +487,4 @@ fn abs_path<P: AsRef<Path>>(path: P) -> impl Display {
         .expect("failed to get absolute path")
         .to_string_lossy()
         .to_string()
-}
-
-fn format_size(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = KB * 1024;
-
-    if bytes >= MB {
-        format!("{:.2} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.0} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{bytes} B")
-    }
 }

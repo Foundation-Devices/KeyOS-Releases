@@ -4,10 +4,6 @@ A Rust CLI tool for automatically generating KeyOS releases. See `--help` for mo
 
 ## Dependencies
 
-- [updiff](https://github.com/Foundation-Devices/updiff)
-
-## Testing
-
-- In order to run the tests, `updiff` tool has to be visible to `release-gen`. This means that you have to either:
-  - Have it in `PATH`
-  - Set the `UPDIFF_PATH` environment variable before running the tests.
+- A checkout of [keyos](https://github.com/Foundation-Devices/keyos), which builds the patch
+  bodies through `cargo xtask build-patches`. Pass its path with `--keyos-dir` if it is not at
+  `../keyos`.

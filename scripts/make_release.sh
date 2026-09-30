@@ -36,8 +36,8 @@
 # - This script uses the `keyos` build commands to produce `boot.img`. You can find `keyos` here:
 #   https://github.com/Foundation-Devices/keyos.
 #
-# - This script calls `release-gen` (KeyOS-Releases/tools/release-gen) which needs the `updiff`
-#   tool to function. This tool can be found here: https://github.com/Foundation-Devices/updiff.
+# - This script calls `release-gen` (KeyOS-Releases/tools/release-gen), which builds the patches
+#   through `cargo xtask build-patches` in the `keyos` repository.
 #
 # - To sign the release tarball, `cosign2` needs to be installed. It can be done by running the
 #   following command in the root of the `keyos` repository:
